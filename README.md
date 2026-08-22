@@ -1,6 +1,6 @@
 # Windows Resource Download
 
-这是 [AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload) 的 Windows 桌面移植版，基于 Compose Multiplatform 构建，提供与安卓端一致的 WebDAV 文件浏览、下载和上传体验。
+这是 [AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload) 的 Windows 桌面适配版，基于 Compose Multiplatform 构建，提供与安卓端一致的 WebDAV 文件浏览、下载和上传体验。
 
 ## 当前状态
 
@@ -80,5 +80,5 @@ $env:GRADLE_OPTS = "-Xmx2048m -XX:MaxMetaspaceSize=512m"
 
 ## 致谢
 
-- 安卓端原项目：[zhuzhuzihan/AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload)
+- 安卓端项目：[zhuzhuzihan/AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload)
 - 后端 API：由项目组提供
