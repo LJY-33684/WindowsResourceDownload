@@ -40,7 +40,13 @@ class DesktopPublicDownloadStore(
             FileInputStream(source).use { input -> input.copyTo(output) }
             output.fd.sync()
         }
-        val destination = moveToAvailableFile(stage, task.storageName)
+        // 如果有相对路径，保存到子目录
+        val targetDir = if (task.relativePath.isNotBlank()) {
+            File(downloadsDir, task.relativePath).also { it.mkdirs() }
+        } else {
+            downloadsDir
+        }
+        val destination = moveToAvailableFile(stage, task.storageName, targetDir)
         val resultUri = destination.toURI().toString()
         onPublished(resultUri)
         return resultUri
@@ -64,8 +70,7 @@ class DesktopPublicDownloadStore(
         return runCatching { File(URI(publicUri)) }.getOrNull()?.takeIf { it.isFile }
     }
 
-    private fun moveToAvailableFile(stage: File, requestedName: String): File {
-        val directory = stage.parentFile ?: throw java.io.IOException("Download stage has no parent")
+    private fun moveToAvailableFile(stage: File, requestedName: String, directory: File): File {
         val extensionStart = requestedName.lastIndexOf('.').takeIf { it > 0 } ?: requestedName.length
         val base = requestedName.substring(0, extensionStart)
         val extension = requestedName.substring(extensionStart)

@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import link.mczihan.androidResourceDownload.app.AndroidResourceDownloadRoot
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.core.platform.DesktopDragDrop
 import link.mczihan.androidResourceDownload.core.theme.ThemeMode
 import link.mczihan.androidResourceDownload.di.AppContainer
@@ -42,13 +43,6 @@ import java.net.URI
 private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 private const val CALLBACK_SCHEME_PREFIX = "link.mczihan.androidresourcedownload://"
 
-private fun debugLog(message: String) {
-    try {
-        val logFile = File(System.getProperty("java.io.tmpdir"), "ard_debug.log")
-        logFile.appendText("[${System.currentTimeMillis()}] $message\n")
-    } catch (_: Exception) { }
-}
-
 /** Read Windows system dark mode from registry. */
 private fun isWindowsDarkMode(): Boolean {
     return try {
@@ -66,22 +60,25 @@ private fun isWindowsDarkMode(): Boolean {
 }
 
 fun main(args: Array<String>) {
-    debugLog("App started with args: ${args.joinToString(" ")}")
+    // Initialize logger in app working directory
+    val appDir = File(System.getProperty("user.dir"))
+    AppLogger.init(appDir)
+    AppLogger.info("应用启动，参数: ${args.joinToString(" ")}")
 
     val callbackUrl = args.firstOrNull { it.startsWith(CALLBACK_SCHEME_PREFIX) }
 
     if (callbackUrl != null) {
-        debugLog("Found callback URL in args: $callbackUrl")
+        AppLogger.debug("Found callback URL in args: $callbackUrl")
         if (SingleInstanceChannel.trySendToExistingInstance(callbackUrl)) {
-            debugLog("Sent callback to existing instance, exiting")
+            AppLogger.debug("Sent callback to existing instance, exiting")
             return
         }
-        debugLog("No existing instance, will process callback after startup")
+        AppLogger.debug("No existing instance, will process callback after startup")
     }
 
     val pendingFromFile = WindowsSchemeRegistrar.readPendingCallback()
     if (pendingFromFile != null) {
-        debugLog("Found pending callback from file: $pendingFromFile")
+        AppLogger.debug("Found pending callback from file: $pendingFromFile")
     }
 
     application {
@@ -89,7 +86,7 @@ fun main(args: Array<String>) {
             onCloseRequest = ::exitApplication,
             title = "资源下载",
             icon = painterResource("app_icon.png"),
-            state = rememberWindowState(width = 420.dp, height = 800.dp),
+            state = rememberWindowState(width = 840.dp, height = 534.dp),
         ) {
             // Apply native title bar dark mode via Windows DWM API (works on Win10 20H1+/Win11)
             LaunchedEffect(Unit) {
@@ -99,11 +96,11 @@ fun main(args: Array<String>) {
                     delay(1500)
                 }
             }
-            // Enforce minimum window size (2/3 of initial 420x800 = 280x534 dp)
+            // Enforce minimum window size (2/3 of initial 840x534 = 560x356 dp)
             val density = LocalDensity.current
             LaunchedEffect(window, density) {
-                val minW = with(density) { 280.dp.toPx() }.toInt()
-                val minH = with(density) { 534.dp.toPx() }.toInt()
+                val minW = with(density) { 560.dp.toPx() }.toInt()
+                val minH = with(density) { 356.dp.toPx() }.toInt()
                 window.minimumSize = Dimension(minW, minH)
             }
             // Global drag-and-drop target for file upload (admin-only, gated by DesktopDragDrop.enabled)
@@ -172,7 +169,7 @@ private fun AppContent(initialCallback: String? = null) {
     val oauthStarted = remember { oauthServer.start() }
     val schemeRegistered = remember {
         val result = WindowsSchemeRegistrar.register()
-        debugLog("Scheme registration result: $result, isRegistered: ${WindowsSchemeRegistrar.isRegistered()}")
+        AppLogger.debug("Scheme registration result: $result, isRegistered: ${WindowsSchemeRegistrar.isRegistered()}")
         result
     }
 
@@ -183,7 +180,7 @@ private fun AppContent(initialCallback: String? = null) {
 
     LaunchedEffect(initialCallback) {
         initialCallback?.let { url ->
-            debugLog("Processing initial callback: $url")
+            AppLogger.debug("Processing initial callback: $url")
             withContext(Dispatchers.Main) {
                 container.authViewModel.handleGithubCallbackUrl(url)
             }
@@ -194,7 +191,7 @@ private fun AppContent(initialCallback: String? = null) {
         SingleInstanceChannel.callbacks.collect { url ->
             url?.let {
                 SingleInstanceChannel.consume(it)
-                debugLog("Processing single-instance callback: $it")
+                AppLogger.debug("Processing single-instance callback: $it")
                 withContext(Dispatchers.Main) {
                     container.authViewModel.handleGithubCallbackUrl(it)
                 }
@@ -206,7 +203,7 @@ private fun AppContent(initialCallback: String? = null) {
         container.oauthCallbackBus.events.collect { url ->
             url?.let {
                 container.oauthCallbackBus.consume(it)
-                debugLog("Processing HTTP server callback: $it")
+                AppLogger.debug("Processing HTTP server callback: $it")
                 withContext(Dispatchers.Main) {
                     container.authViewModel.handleGithubCallbackUrl(it.toString())
                 }
@@ -222,7 +219,7 @@ private fun AppContent(initialCallback: String? = null) {
                 if (clipboard.isDataFlavorAvailable(DataFlavor.stringFlavor)) {
                     val content = clipboard.getData(DataFlavor.stringFlavor) as? String
                     if (content != null && content.startsWith(CALLBACK_SCHEME_PREFIX) && content.contains("code=")) {
-                        debugLog("Found callback URL in clipboard: $content")
+                        AppLogger.debug("Found callback URL in clipboard: $content")
                         clipboard.setContents(StringSelection(""), null)
                         withContext(Dispatchers.Main) {
                             container.authViewModel.handleGithubCallbackUrl(content)
@@ -238,7 +235,7 @@ private fun AppContent(initialCallback: String? = null) {
             delay(3000)
             val fromFile = WindowsSchemeRegistrar.readPendingCallback()
             if (fromFile != null && fromFile.startsWith(CALLBACK_SCHEME_PREFIX)) {
-                debugLog("Found callback URL in temp file: $fromFile")
+                AppLogger.debug("Found callback URL in temp file: $fromFile")
                 withContext(Dispatchers.Main) {
                     container.authViewModel.handleGithubCallbackUrl(fromFile)
                 }
@@ -261,7 +258,7 @@ private fun AppContent(initialCallback: String? = null) {
                 return@AndroidResourceDownloadRoot
             }
 
-            debugLog("GitHub login start URL: $startUrl")
+            AppLogger.debug("GitHub login start URL: $startUrl")
 
             try {
                 val clipboard = Toolkit.getDefaultToolkit().systemClipboard

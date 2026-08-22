@@ -77,6 +77,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import link.mczihan.androidResourceDownload.BuildConfig
+import link.mczihan.androidResourceDownload.core.ui.FastScrollbar
 import link.mczihan.androidResourceDownload.core.theme.DEFAULT_THEME_SEED_ARGB
 import link.mczihan.androidResourceDownload.core.theme.ThemeMode
 import link.mczihan.androidResourceDownload.core.theme.ThemeSchemeVariant
@@ -121,12 +122,17 @@ fun SettingsScreen(
         modifier = modifier,
         topBar = { TopAppBar(title = { Text("设置") }) },
     ) { innerPadding ->
-        Column(
+        val scrollState = rememberScrollState()
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState()),
+                .padding(innerPadding),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState),
+            ) {
             Text(
                 text = "外观",
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
@@ -223,6 +229,11 @@ fun SettingsScreen(
                     SettingsIcon(Icons.AutoMirrored.Filled.Logout, isError = true)
                 },
                 modifier = Modifier.clickable { showLogout = true },
+            )
+            }
+            FastScrollbar(
+                scrollState = scrollState,
+                modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
     }

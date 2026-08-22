@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,6 +61,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import link.mczihan.androidResourceDownload.core.common.formatFileSize
 import link.mczihan.androidResourceDownload.core.ui.EmptyPane
+import link.mczihan.androidResourceDownload.core.ui.FastScrollbar
 import link.mczihan.androidResourceDownload.domain.model.UploadStatus
 import link.mczihan.androidResourceDownload.domain.model.UploadTask
 
@@ -132,22 +134,33 @@ fun UploadsScreen(
                 icon = Icons.Default.Upload,
             )
         } else {
-            LazyColumn(
+            val listState = rememberLazyListState()
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
             ) {
-                items(tasks, key = UploadTask::id) { task ->
-                    UploadTaskItem(
-                        task = task,
-                        currentSpeed = currentSpeeds[task.id] ?: 0L,
-                        onRetry = { onRetry(task.id) },
-                        onCancel = { onCancel(task.id) },
-                        onDelete = { onDelete(task.id) },
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
+                ) {
+                    items(tasks, key = UploadTask::id) { task ->
+                        UploadTaskItem(
+                            task = task,
+                            currentSpeed = currentSpeeds[task.id] ?: 0L,
+                            onRetry = { onRetry(task.id) },
+                            onCancel = { onCancel(task.id) },
+                            onDelete = { onDelete(task.id) },
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
                 }
+                FastScrollbar(
+                    listState = listState,
+                    itemCount = tasks.size,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
             }
         }
     }

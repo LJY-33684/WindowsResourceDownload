@@ -328,7 +328,7 @@ private fun MainShell(
                     viewModel = filesViewModel,
                     role = user.role,
                     onProfile = onProfile,
-                    onDownload = { file -> downloadsViewModel.enqueue(file) },
+                    onDownload = { file, relativePath -> downloadsViewModel.enqueue(file, relativePath) },
                     onUploadFiles = { files, destination ->
                         uploadsViewModel.enqueueFiles(files, destination)
                         navController.navigate(ShellRoute.Uploads.route) {

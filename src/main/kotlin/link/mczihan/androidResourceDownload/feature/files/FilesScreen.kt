@@ -1,9 +1,15 @@
 package link.mczihan.androidResourceDownload.feature.files
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -20,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -37,12 +45,14 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
@@ -70,25 +80,30 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.awt.awtEventOrNull
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import link.mczihan.androidResourceDownload.core.common.formatDate
 import link.mczihan.androidResourceDownload.core.common.formatFileSize
 import link.mczihan.androidResourceDownload.core.platform.DesktopDragDrop
 import link.mczihan.androidResourceDownload.core.ui.EmptyPane
 import link.mczihan.androidResourceDownload.core.ui.ErrorPane
+import link.mczihan.androidResourceDownload.core.ui.FastScrollbar
 import link.mczihan.androidResourceDownload.core.ui.LoadingPane
 import link.mczihan.androidResourceDownload.domain.model.FileNode
 import link.mczihan.androidResourceDownload.domain.model.FilePreviewContent
@@ -107,7 +122,7 @@ fun FilesScreen(
     viewModel: FilesViewModel,
     role: Role,
     onProfile: () -> Unit,
-    onDownload: (FileNode) -> Unit,
+    onDownload: (FileNode, String) -> Unit,
     onUploadFiles: (List<File>, WebDavPath) -> Unit,
     onUploadDirectory: (File, WebDavPath) -> Unit,
     onMessage: (String) -> Unit,
@@ -117,12 +132,16 @@ fun FilesScreen(
     val mutationState by viewModel.mutationState.collectAsState()
     val directoryPickerState by viewModel.directoryPickerState.collectAsState()
     val previewState by viewModel.previewState.collectAsState()
+    val multiSelectMode by viewModel.multiSelectMode.collectAsState()
+    val selectedPaths by viewModel.selectedPaths.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     var selectedFile by remember { mutableStateOf<FileNode?>(null) }
     var showCreateDirectoryDialog by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<FileNode?>(null) }
     var renameTarget by remember { mutableStateOf<FileNode?>(null) }
     var showUploadMenu by remember { mutableStateOf(false) }
     var transferRequest by remember { mutableStateOf<TransferRequest?>(null) }
+    var batchTransferRequest by remember { mutableStateOf<BatchTransferRequest?>(null) }
     val isAdmin = role == Role.ADMIN
     val activePath = realState.path
     val displayedPath = activePath.toString()
@@ -167,38 +186,97 @@ fun FilesScreen(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("文件")
-                        Text(
-                            text = displayedPath,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    if (!activePath.isRoot) {
-                        IconButton(onClick = { viewModel.navigateUp() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回上一级")
+            if (multiSelectMode && isAdmin) {
+                TopAppBar(
+                    title = { Text("已选择 ${selectedPaths.size} 项") },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.exitMultiSelect() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "取消选择")
                         }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.retry() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新文件列表")
-                    }
-                    IconButton(onClick = onProfile) {
-                        Icon(Icons.Default.Person, contentDescription = "个人中心")
-                    }
-                },
-            )
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.selectAll() }) {
+                            Icon(Icons.Default.SelectAll, contentDescription = "全选")
+                        }
+                        IconButton(onClick = {
+                            val files = viewModel.getSelectedFiles()
+                            if (files.isNotEmpty()) {
+                                batchTransferRequest = BatchTransferRequest(files, TransferType.MOVE)
+                                viewModel.openDestinationPicker(activePath)
+                            }
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "批量移动")
+                        }
+                        IconButton(onClick = {
+                            val files = viewModel.getSelectedFiles()
+                            if (files.isNotEmpty()) {
+                                batchTransferRequest = BatchTransferRequest(files, TransferType.COPY)
+                                viewModel.openDestinationPicker(activePath)
+                            }
+                        }) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "批量复制")
+                        }
+                        IconButton(onClick = {
+                            val selected = viewModel.getSelectedFiles()
+                            var count = 0
+                            selected.forEach { item ->
+                                if (item.isDirectory) {
+                                    viewModel.downloadFolder(item) { fileNode, relativePath ->
+                                        onDownload(fileNode, relativePath)
+                                        count++
+                                    }
+                                } else {
+                                    onDownload(item, "")
+                                    count++
+                                }
+                            }
+                            if (selected.isNotEmpty()) onMessage("已加入下载任务")
+                            viewModel.exitMultiSelect()
+                        }) {
+                            Icon(Icons.Default.Download, contentDescription = "批量下载")
+                        }
+                        IconButton(onClick = {
+                            val files = viewModel.getSelectedFiles()
+                            if (files.isNotEmpty()) viewModel.batchDelete(files)
+                        }) {
+                            Icon(Icons.Default.Delete, contentDescription = "批量删除")
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text("文件")
+                            Text(
+                                text = displayedPath,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        if (!activePath.isRoot) {
+                            IconButton(onClick = { viewModel.navigateUp() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回上一级")
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.refresh() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新文件列表")
+                        }
+                        IconButton(onClick = onProfile) {
+                            Icon(Icons.Default.Person, contentDescription = "个人中心")
+                        }
+                    },
+                )
+            }
         },
         floatingActionButton = {
-            if (isAdmin) {
+            if (isAdmin && !multiSelectMode) {
                 Column(
                     horizontalAlignment = Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -259,19 +337,52 @@ fun FilesScreen(
                 onRetry = viewModel::retry,
                 modifier = Modifier.padding(innerPadding),
             )
-            is FilesUiState.Success -> FileList(
-                files = contentState.files.filter { isAdmin || !it.isUploadTemporary },
-                onFileClick = { file ->
-                    if (file.isDirectory) {
-                        viewModel.openDirectory(WebDavPath.parseDecoded(file.path))
-                    } else {
-                        selectedFile = file
+            is FilesUiState.Success -> Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+                FileList(
+                    files = contentState.files.filter { isAdmin || !it.isUploadTemporary },
+                    onFileClick = { file ->
+                        if (multiSelectMode) {
+                            viewModel.toggleSelection(file.path)
+                        } else if (file.isDirectory) {
+                            viewModel.openDirectory(WebDavPath.parseDecoded(file.path))
+                        } else {
+                            selectedFile = file
+                        }
+                    },
+                    onFileLongClick = { file ->
+                        if (isAdmin && !multiSelectMode) {
+                            viewModel.enterMultiSelect()
+                            viewModel.toggleSelection(file.path)
+                        }
+                    },
+                    onManage = { if (isAdmin) selectedFile = it },
+                    isAdmin = isAdmin,
+                    multiSelectMode = multiSelectMode,
+                    selectedPaths = selectedPaths,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // 刷新指示器（与安卓 PullToRefreshBox 效果一致：白色圆底 + 转圈线条）
+                AnimatedVisibility(
+                    visible = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    enter = fadeIn() + slideInVertically { -it },
+                    exit = fadeOut() + slideOutVertically { -it },
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.padding(top = 8.dp).size(40.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.5.dp,
+                            )
+                        }
                     }
-                },
-                onManage = { if (isAdmin) selectedFile = it },
-                isAdmin = isAdmin,
-                modifier = Modifier.padding(innerPadding),
-            )
+                }
+            }
         }
     }
 
@@ -315,7 +426,11 @@ fun FilesScreen(
                 viewModel.preview(file)
             },
             onDownload = {
-                onDownload(file)
+                onDownload(file, "")
+                selectedFile = null
+            },
+            onDownloadFolder = {
+                viewModel.downloadFolder(file) { fileNode, relativePath -> onDownload(fileNode, relativePath) }
                 selectedFile = null
             },
             onRename = {
@@ -358,6 +473,29 @@ fun FilesScreen(
                     viewModel.copy(source, request.file.isDirectory, directory, request.file.etag)
                 }
                 transferRequest = null
+                viewModel.dismissDestinationPicker()
+            },
+        )
+    }
+
+    batchTransferRequest?.takeIf { isAdmin }?.let { request ->
+        DestinationDirectoryDialog(
+            request = TransferRequest(request.files.first(), request.type),
+            state = directoryPickerState,
+            onOpenDirectory = { viewModel.openDestinationDirectory(it) },
+            onNavigateUp = { viewModel.navigateDestinationUp() },
+            onRetry = { viewModel.retryDestinationPicker() },
+            onDismiss = {
+                batchTransferRequest = null
+                viewModel.dismissDestinationPicker()
+            },
+            onConfirm = { directory ->
+                if (request.type == TransferType.MOVE) {
+                    viewModel.batchMove(request.files, directory)
+                } else {
+                    viewModel.batchCopy(request.files, directory)
+                }
+                batchTransferRequest = null
                 viewModel.dismissDestinationPicker()
             },
         )
@@ -459,6 +597,7 @@ fun FilesScreen(
 
 private enum class TransferType { MOVE, COPY }
 private data class TransferRequest(val file: FileNode, val type: TransferType)
+private data class BatchTransferRequest(val files: List<FileNode>, val type: TransferType)
 
 private fun loadAppIconImage(): java.awt.Image? = try {
     val url = object {}.javaClass.getResource("/app_icon.png")
@@ -508,19 +647,30 @@ private fun FileList(
     onFileClick: (FileNode) -> Unit,
     onManage: (FileNode) -> Unit,
     isAdmin: Boolean,
+    multiSelectMode: Boolean = false,
+    selectedPaths: Set<String> = emptySet(),
+    onFileLongClick: (FileNode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 12.dp,
-            top = 8.dp,
-            end = 12.dp,
-            bottom = if (isAdmin) 140.dp else 112.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    val listState = rememberLazyListState()
+
+    Box(
+        modifier = modifier
+            .fillMaxSize(),
     ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                top = 8.dp,
+                end = 12.dp,
+                bottom = if (isAdmin && !multiSelectMode) 140.dp else 112.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
         items(files, key = { it.path }) { file ->
+            val isSelected = file.path in selectedPaths
             ListItem(
                 headlineContent = {
                     Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -537,33 +687,39 @@ private fun FileList(
                     )
                 },
                 leadingContent = {
-                    Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = if (file.isDirectory) MaterialTheme.shapes.medium else CircleShape,
-                        color = if (file.isDirectory) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        },
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (file.isDirectory) {
-                                    Icons.Default.Folder
-                                } else {
-                                    Icons.AutoMirrored.Filled.InsertDriveFile
-                                },
-                                contentDescription = null,
-                                tint = if (file.isDirectory) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
+                    if (multiSelectMode) {
+                        Checkbox(checked = isSelected, onCheckedChange = { onFileClick(file) })
+                    } else {
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            shape = if (file.isDirectory) MaterialTheme.shapes.medium else CircleShape,
+                            color = if (file.isDirectory) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            },
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (file.isDirectory) {
+                                        Icons.Default.Folder
+                                    } else {
+                                        Icons.AutoMirrored.Filled.InsertDriveFile
+                                    },
+                                    contentDescription = null,
+                                    tint = if (file.isDirectory) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
                         }
                     }
                 },
-                trailingContent = if (file.isDirectory || isAdmin) {
+                trailingContent = if (multiSelectMode) {
+                    null
+                } else if (file.isDirectory || isAdmin) {
                     {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (file.isDirectory) {
@@ -577,11 +733,17 @@ private fun FileList(
                         }
                     }
                 } else null,
-                colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+                colors = ListItemDefaults.colors(
+                    containerColor = if (isSelected) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    },
+                ),
                 modifier = Modifier
                     .clip(MaterialTheme.shapes.small)
                     .clickable { onFileClick(file) }
-                    .pointerInput(file) {
+                    .pointerInput(file, multiSelectMode) {
                         awaitEachGesture {
                             val event = awaitPointerEvent()
                             val awt = event.awtEventOrNull
@@ -589,12 +751,24 @@ private fun FileList(
                                awt.button == java.awt.event.MouseEvent.BUTTON3
                             ) {
                                 event.changes.forEach { it.consume() }
-                                onManage(file)
+                                if (multiSelectMode) {
+                                    onFileClick(file)
+                                } else {
+                                    onFileLongClick(file)
+                                }
                             }
                         }
                     },
             )
         }
+        }
+
+        // 快速滚动滑块
+        FastScrollbar(
+            listState = listState,
+            itemCount = files.size,
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
     }
 }
 
@@ -606,6 +780,7 @@ private fun FileDetailsSheet(
     onDismiss: () -> Unit,
     onPreview: () -> Unit,
     onDownload: () -> Unit,
+    onDownloadFolder: () -> Unit = {},
     onRename: () -> Unit,
     onMove: () -> Unit,
     onCopy: () -> Unit,
@@ -667,6 +842,13 @@ private fun FileDetailsSheet(
                         Spacer(Modifier.width(8.dp))
                         Text("下载")
                     }
+                }
+            }
+            if (file.isDirectory && isAdmin) {
+                Button(onClick = onDownloadFolder, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.Download, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("下载文件夹")
                 }
             }
             if (isAdmin) {

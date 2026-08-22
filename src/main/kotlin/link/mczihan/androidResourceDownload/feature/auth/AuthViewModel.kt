@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import link.mczihan.androidResourceDownload.BuildConfig
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.data.auth.AuthRepository
 import link.mczihan.androidResourceDownload.domain.model.AuthSession
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavCredentialProvider
@@ -205,10 +206,7 @@ class AuthViewModel(
     }
 
     private fun debugAuthLog(message: String) {
-        try {
-            val logFile = java.io.File(System.getProperty("java.io.tmpdir"), "ard_debug.log")
-            logFile.appendText("[${System.currentTimeMillis()}] [AuthViewModel] $message\n")
-        } catch (_: Exception) { }
+        AppLogger.debug("[Auth] $message")
     }
 
     private fun parseQueryParams(url: String): Map<String, String> {

@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
 import link.mczihan.androidResourceDownload.domain.model.DownloadTask
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavClient
@@ -49,6 +50,7 @@ class DesktopDownloadManager(
             updatedAt = now,
         )
         _tasks.value = _tasks.value + task
+        AppLogger.info("加入下载队列: $fileName ($remotePath)")
         startDownload(task)
     }
 
@@ -91,9 +93,9 @@ class DesktopDownloadManager(
                         updatedAt = System.currentTimeMillis(),
                     )
                 }
-                println("Download complete: ${task.fileName} -> ${targetFile.absolutePath}")
+                AppLogger.info("下载完成: ${task.fileName} -> ${targetFile.absolutePath}")
             } catch (error: Exception) {
-                println("Download failed: ${task.fileName} - ${error.message}")
+                AppLogger.error("下载失败: ${task.fileName}", error)
                 updateTask(task.id) {
                     it.copy(status = DownloadStatus.FAILED, errorMessage = error.message, updatedAt = System.currentTimeMillis())
                 }
@@ -104,6 +106,7 @@ class DesktopDownloadManager(
 
     fun retry(taskId: String) {
         val task = _tasks.value.find { it.id == taskId } ?: return
+        AppLogger.info("重试下载: ${task.fileName}")
         startDownload(task)
     }
 
@@ -111,6 +114,7 @@ class DesktopDownloadManager(
         activeJobs[taskId]?.cancel()
         activeJobs.remove(taskId)
         updateTask(taskId) { it.copy(status = DownloadStatus.CANCELLED, updatedAt = System.currentTimeMillis()) }
+        AppLogger.info("取消下载: taskId=$taskId")
     }
 
     fun openDownloadFolder() {

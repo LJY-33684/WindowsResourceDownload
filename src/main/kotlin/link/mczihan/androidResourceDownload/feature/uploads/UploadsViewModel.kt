@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import kotlinx.coroutines.sync.withPermit
 import link.mczihan.androidResourceDownload.core.common.formatFileSize
 import link.mczihan.androidResourceDownload.data.file.UploadDocument
@@ -328,6 +329,7 @@ class UploadsViewModel(
                 repository.createDirectory(path)
                 // Auto-remove on success (matches Android completeAndDelete behavior)
                 _tasks.update { it.filterNot { t -> t.id == taskId } }
+                AppLogger.info("上传文件夹成功: ${task.fileName} -> ${task.remotePath}")
             } else {
                 val file = task.sourceFile ?: run {
                     updateTask(taskId) { it.copy(status = UploadStatus.FAILED, errorMessage = "源文件不存在") }
@@ -357,9 +359,11 @@ class UploadsViewModel(
                 )
                 // Auto-remove on success (matches Android completeAndDelete behavior)
                 _tasks.update { it.filterNot { t -> t.id == taskId } }
+                AppLogger.info("上传成功: ${task.fileName} -> ${task.remotePath}")
             }
         } catch (e: CancellationException) {
             updateTask(taskId) { it.copy(status = UploadStatus.CANCELLED, committing = false) }
+            AppLogger.info("上传已取消: ${task.fileName}")
             throw e
         } catch (e: Exception) {
             updateTask(taskId) {
@@ -369,6 +373,7 @@ class UploadsViewModel(
                     committing = false,
                 )
             }
+            AppLogger.error("上传失败: ${task.fileName}", e)
         } finally {
             activeJobs.remove(taskId)
             // Start next pending task

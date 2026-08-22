@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.data.file.FileRepository
 import link.mczihan.androidResourceDownload.data.file.TextEncodingException
 import link.mczihan.androidResourceDownload.data.file.UploadDocument
@@ -99,6 +100,12 @@ class FilesViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow<FilesUiState>(FilesUiState.Loading(WebDavPath.root()))
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private val _multiSelectMode = MutableStateFlow(false)
+    val multiSelectMode: StateFlow<Boolean> = _multiSelectMode.asStateFlow()
+    private val _selectedPaths = MutableStateFlow<Set<String>>(emptySet())
+    val selectedPaths: StateFlow<Set<String>> = _selectedPaths.asStateFlow()
     private val _mutationState = MutableStateFlow<FileMutationState>(FileMutationState.Idle)
     val mutationState: StateFlow<FileMutationState> = _mutationState.asStateFlow()
     private val _directoryPickerState = MutableStateFlow<DirectoryPickerState>(DirectoryPickerState.Idle)
@@ -120,10 +127,14 @@ class FilesViewModel(
         load(WebDavPath.root())
     }
 
-    private fun load(path: WebDavPath) {
+    private fun load(path: WebDavPath, isRefresh: Boolean = false) {
         val version = ++loadVersion
         loadJob?.cancel()
-        _state.value = FilesUiState.Loading(path)
+        if (!isRefresh) {
+            _state.value = FilesUiState.Loading(path)
+        } else {
+            _isRefreshing.value = true
+        }
         loadJob = viewModelScope.launch {
             val result = try {
                 repository.list(path).let { files ->
@@ -136,21 +147,168 @@ class FilesViewModel(
             } catch (error: Exception) {
                 FilesUiState.Error(path, error.message ?: "文件列表加载失败")
             }
-            if (version == loadVersion) _state.value = result
+            if (version == loadVersion) {
+                _state.value = result
+                _isRefreshing.value = false
+            }
         }
     }
 
     fun openDirectory(path: WebDavPath) {
+        exitMultiSelect()
         load(path)
     }
 
     fun navigateUp() {
+        exitMultiSelect()
         val segments = _state.value.path.decodedSegments
         if (segments.isEmpty()) return
         load(WebDavPath.fromDecodedSegments(segments.dropLast(1)))
     }
 
     fun retry() = load(_state.value.path)
+
+    fun refresh() = load(_state.value.path, isRefresh = true)
+
+    fun enterMultiSelect() {
+        _multiSelectMode.value = true
+    }
+
+    fun exitMultiSelect() {
+        _multiSelectMode.value = false
+        _selectedPaths.value = emptySet()
+    }
+
+    fun toggleSelection(path: String) {
+        _selectedPaths.value = _selectedPaths.value.toMutableSet().apply {
+            if (contains(path)) remove(path) else add(path)
+        }
+    }
+
+    fun selectAll() {
+        val current = _state.value
+        if (current is FilesUiState.Success) {
+            _selectedPaths.value = current.files.map { it.path }.toSet()
+        }
+    }
+
+    fun getSelectedFiles(): List<FileNode> {
+        val current = _state.value
+        val selected = _selectedPaths.value
+        return if (current is FilesUiState.Success) {
+            current.files.filter { it.path in selected }
+        } else emptyList()
+    }
+
+    fun batchDelete(files: List<FileNode>) {
+        viewModelScope.launch {
+            var successCount = 0
+            files.forEach { file ->
+                try {
+                    repository.delete(
+                        WebDavPath.parseDecoded(file.path),
+                        file.isDirectory,
+                        file.etag,
+                    )
+                    successCount++
+                    AppLogger.info("删除成功: ${file.name}")
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    AppLogger.error("删除失败: ${file.name}", error)
+                }
+            }
+            exitMultiSelect()
+            load(_state.value.path)
+            messageChannel.send("已删除 $successCount/${files.size} 项")
+        }
+    }
+
+    fun batchMove(files: List<FileNode>, destinationDirectory: WebDavPath) {
+        batchTransfer(files, destinationDirectory, move = true)
+    }
+
+    fun batchCopy(files: List<FileNode>, destinationDirectory: WebDavPath) {
+        batchTransfer(files, destinationDirectory, move = false)
+    }
+
+    private fun batchTransfer(files: List<FileNode>, destinationDirectory: WebDavPath, move: Boolean) {
+        viewModelScope.launch {
+            var successCount = 0
+            val action = if (move) "移动" else "复制"
+            files.forEach { file ->
+                val source = WebDavPath.parseDecoded(file.path)
+                val destination = runCatching {
+                    destinationDirectory.child(requireNotNull(source.name))
+                }.getOrNull() ?: return@forEach
+                try {
+                    if (move) {
+                        repository.move(
+                            source = source,
+                            destination = destination,
+                            overwrite = false,
+                            sourceIsCollection = file.isDirectory,
+                            sourceEtag = file.etag,
+                        )
+                    } else {
+                        repository.copy(
+                            source = source,
+                            destination = destination,
+                            overwrite = false,
+                            sourceIsCollection = file.isDirectory,
+                            sourceEtag = file.etag,
+                        )
+                    }
+                    successCount++
+                    AppLogger.info("$action 成功: ${file.name} -> $destinationDirectory")
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    AppLogger.error("$action 失败: ${file.name}", error)
+                }
+            }
+            exitMultiSelect()
+            load(_state.value.path)
+            messageChannel.send("已$action $successCount/${files.size} 项")
+        }
+    }
+
+    private val folderDownloadCount = mutableMapOf<String, Int>()
+
+    fun downloadFolder(folder: FileNode, onFile: (FileNode, String) -> Unit) {
+        viewModelScope.launch {
+            val folderPath = folder.path.trimEnd('/')
+            val files = listFilesRecursive(WebDavPath.parseDecoded(folder.path))
+            // 生成唯一文件夹名，重复时加 (2)(3)...
+            val count = folderDownloadCount.getOrDefault(folder.name, 0) + 1
+            folderDownloadCount[folder.name] = count
+            val uniqueFolderName = if (count > 1) "${folder.name}($count)" else folder.name
+            files.forEach { file ->
+                val relativeFull = file.path.removePrefix(folderPath).trimStart('/')
+                val subDir = relativeFull.substringBeforeLast('/', "")
+                val relativeDir = if (subDir.isNotEmpty()) "$uniqueFolderName/$subDir" else uniqueFolderName
+                onFile(file, relativeDir)
+            }
+            AppLogger.info("文件夹下载: $uniqueFolderName, 共 ${files.size} 个文件已加入队列")
+        }
+    }
+
+    private suspend fun listFilesRecursive(path: WebDavPath): List<FileNode> {
+        val result = mutableListOf<FileNode>()
+        try {
+            val items = repository.list(path)
+            for (item in items) {
+                if (item.isDirectory) {
+                    result.addAll(listFilesRecursive(WebDavPath.parseDecoded(item.path)))
+                } else {
+                    result.add(item)
+                }
+            }
+        } catch (error: Exception) {
+            AppLogger.error("递归列出文件失败: $path", error)
+        }
+        return result
+    }
 
     fun preview(file: FileNode) {
         if (file.previewFormat() == null) return

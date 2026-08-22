@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import link.mczihan.androidResourceDownload.core.common.formatFileSize
 import link.mczihan.androidResourceDownload.core.ui.EmptyPane
+import link.mczihan.androidResourceDownload.core.ui.FastScrollbar
 import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
 import link.mczihan.androidResourceDownload.domain.model.DownloadTask
 
@@ -130,26 +132,37 @@ fun DownloadsScreen(
                 icon = Icons.Default.Download,
             )
         } else {
-            LazyColumn(
+            val listState = rememberLazyListState()
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
             ) {
-                items(tasks, key = DownloadTask::id) { task ->
-                    DownloadTaskItem(
-                        task = task,
-                        currentSpeed = currentSpeeds[task.id] ?: 0L,
-                        onStatusChange = { status -> onStatusChange(task.id, status) },
-                        onOpen = { onOpen(task) },
-                        onDelete = {
-                            deleteTaskId = task.id
-                            deleteLocalFile = true
-                        },
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                    )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
+                ) {
+                    items(tasks, key = DownloadTask::id) { task ->
+                        DownloadTaskItem(
+                            task = task,
+                            currentSpeed = currentSpeeds[task.id] ?: 0L,
+                            onStatusChange = { status -> onStatusChange(task.id, status) },
+                            onOpen = { onOpen(task) },
+                            onDelete = {
+                                deleteTaskId = task.id
+                                deleteLocalFile = true
+                            },
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
                 }
+                FastScrollbar(
+                    listState = listState,
+                    itemCount = tasks.size,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
             }
         }
     }
