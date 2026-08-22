@@ -1,0 +1,2 @@
+latest_version=2.3.1
+update_url=https://github.com/LJY-33684/WindowsResourceDownload/releases/download/v2.3.1/WindowsResourceDownload-2.3.1.zip
