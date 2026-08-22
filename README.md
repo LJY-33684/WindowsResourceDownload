@@ -1,6 +1,6 @@
 # Windows Resource Download
 
-这是一个面向 Windows 的 WebDAV 文件客户端项目，登录后获取后端下发的角色凭据，直接连接 WebDAV 完成列表、下载和管理员写操作。
+这是 [AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload) 的 Windows 桌面适配版，基于 Compose Multiplatform 构建，提供与安卓端一致的 WebDAV 文件浏览、下载和上传体验。
 
 ## 当前状态
 
@@ -73,4 +73,9 @@ $env:GRADLE_OPTS = "-Xmx2048m -XX:MaxMetaspaceSize=512m"
 
 ## 关联项目
 
-- 安卓端：[zhuzhuzihan/AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload)
+当前更新源：`https://github.com/LJY-33684/WindowsResourceDownload/releases/`
+
+## 致谢
+
+- 安卓端项目：[zhuzhuzihan/AndroidResourceDownload](https://github.com/zhuzhuzihan/AndroidResourceDownload)
+- 后端 API：由项目组提供
