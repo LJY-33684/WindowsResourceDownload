@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -205,7 +206,7 @@ fun AboutScreen(
                             .heightIn(max = 320.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        Text(state.releaseNotes, style = MaterialTheme.typography.bodyMedium)
+                        MarkdownText(state.releaseNotes, style = MaterialTheme.typography.bodyMedium)
                     }
                 } else {
                     Text(
@@ -231,7 +232,34 @@ fun AboutScreen(
             title = "已是最新版本",
             icon = Icons.Default.CheckCircle,
             tone = ExpressiveDialogTone.POSITIVE,
-            content = { Text("当前版本 ${state.currentVersion}") },
+            content = {
+                Text(
+                    text = "当前版本 ${state.currentVersion}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!state.releaseNotes.isNullOrBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "当前版本更新内容",
+                        style = MaterialTheme.typography.titleMediumEmphasized,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        MarkdownText(state.releaseNotes, style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    Text(
+                        text = "暂未获取到该版本的更新日志",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            },
             actions = {
                 ExpressiveDialogAction(
                     label = "确定",
