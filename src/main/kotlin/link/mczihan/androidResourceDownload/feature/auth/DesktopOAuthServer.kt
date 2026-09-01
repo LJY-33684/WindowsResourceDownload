@@ -33,8 +33,8 @@ class DesktopOAuthServer(
     private val httpClient = OkHttpClient.Builder()
         .followRedirects(false)
         .followSslRedirects(false)
-        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     fun start(): Int {
@@ -71,27 +71,15 @@ class DesktopOAuthServer(
                     errorMsg = "Proxy request failed: ${e.message}"
                 }
 
-                val responseHtml = if (githubUrl != null) {
-                    // Escape & for HTML context (meta refresh, href)
-                    val htmlEscapedUrl = githubUrl!!.replace("&", "&amp;").replace("\"", "&quot;")
-                    // Escape for JavaScript string context
-                    val jsEscapedUrl = githubUrl!!.replace("\\", "\\\\").replace("\"", "\\\"")
-                    """
-                    <html><head><meta charset="utf-8">
-                    <meta http-equiv="refresh" content="0; url=$htmlEscapedUrl">
-                    <title>正在跳转...</title>
-                    </head>
-                    <body style="margin:0; padding:40px; font-family:sans-serif; text-align:center;">
-                    <h2>正在跳转到 GitHub...</h2>
-                    <p>如果没有自动跳转，请<a href="$htmlEscapedUrl" style="color:#0066cc;">点击这里</a></p>
-                    <p style="color:#999; font-size:12px; margin-top:30px;">URL: $githubUrl</p>
-                    <script>
-                    setTimeout(function(){ window.location.href = "$jsEscapedUrl"; }, 300);
-                    </script>
-                    </body></html>
-                    """.trimIndent()
-                } else {
-                    """
+                // 使用服务器端 302 重定向（浏览器原生跟随，最可靠），
+                // 避免 meta refresh / JS 在部分浏览器（如 Edge）中被拦截导致无法自动跳转。
+                if (githubUrl != null) {
+                    exchange.responseHeaders.set("Location", githubUrl)
+                    exchange.sendResponseHeaders(302, -1)
+                    exchange.close()
+                    return@createContext
+                }
+                val responseHtml = """
                     <html><head><meta charset="utf-8"><title>错误</title></head>
                     <body style="font-family: sans-serif; padding: 20px;">
                     <h2>代理请求失败</h2>
@@ -99,7 +87,6 @@ class DesktopOAuthServer(
                     <p>请返回应用重试，或检查网络连接</p>
                     </body></html>
                     """.trimIndent()
-                }
                 val bodyBytes = responseHtml.toByteArray(Charsets.UTF_8)
                 exchange.responseHeaders.set("Content-Type", "text/html; charset=utf-8")
                 exchange.sendResponseHeaders(200, bodyBytes.size.toLong())

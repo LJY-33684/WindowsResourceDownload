@@ -133,7 +133,7 @@ class AppContainer {
         oauthCallbackBus = oauthCallbackBus,
         downloadQueueController = downloadQueueController,
     )
-    val filesViewModel = FilesViewModel(repository = fileRepository, uploadSource = uploadSource)
+    val filesViewModel = FilesViewModel(repository = fileRepository, uploadSource = uploadSource, themeRepository = themeRepository)
     val downloadsViewModel = DownloadsViewModel(
         repository = downloadRepository,
         queueController = downloadQueueController,

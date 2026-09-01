@@ -2,6 +2,7 @@ package link.mczihan.androidResourceDownload.data.auth
 
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.core.security.SessionStore
 import link.mczihan.androidResourceDownload.domain.model.AuthSession
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavCredentialProvider
@@ -15,10 +16,18 @@ class DefaultAuthRepository(
     private val sessionMutex = Mutex()
 
     override suspend fun restoreSession(): AuthSession? {
-        val session = sessionStore.read() ?: return null
-        return if (session.hasUsableAccessToken(nowEpochMillis(), RESTORE_VALIDITY_BUFFER_MILLIS)) {
+        val session = sessionStore.read() ?: run {
+            AppLogger.debug("restoreSession: 无持久化 session")
+            return null
+        }
+        val now = nowEpochMillis()
+        val usable = session.hasUsableAccessToken(now, RESTORE_VALIDITY_BUFFER_MILLIS)
+        AppLogger.debug("restoreSession: 过期时间=${session.expiresAtEpochMillis}, now=$now, usable=$usable")
+        return if (usable) {
+            AppLogger.debug("restoreSession: accessToken 有效，直接恢复")
             session
         } else {
+            AppLogger.debug("restoreSession: accessToken 已过期，尝试 refresh")
             refreshSession()
         }
     }
@@ -59,6 +68,23 @@ class DefaultAuthRepository(
                 GitHubCompleteRequestDto(
                     code = code,
                     codeVerifier = codeVerifier,
+                    deviceId = deviceId,
+                ),
+            )
+        }
+        return persistLogin(response)
+    }
+
+    override suspend fun loginWithQq(
+        accessToken: String,
+        openId: String,
+        deviceId: String,
+    ): AuthSession {
+        val response = executeBackendCall {
+            authApi.loginWithQq(
+                QqLoginRequestDto(
+                    accessToken = accessToken,
+                    openId = openId,
                     deviceId = deviceId,
                 ),
             )
@@ -128,10 +154,15 @@ class DefaultAuthRepository(
                 authApi.refresh(RefreshTokenRequestDto(session.refreshToken))
             }
         } catch (error: BackendApiException) {
+            AppLogger.warn("refreshSession: 后端返回错误 code=${error.backendCode} message=${error.backendMessage}")
             if (error.isAuthenticationFailure) {
+                AppLogger.warn("refreshSession: 认证失败，清除持久化 session")
                 sessionStore.clear()
                 return null
             }
+            throw error
+        } catch (error: Exception) {
+            AppLogger.warn("refreshSession: 网络/其他异常 ${error.message}，保留原 session 文件")
             throw error
         }
         val refreshedSession = session.copy(
@@ -139,6 +170,7 @@ class DefaultAuthRepository(
             refreshToken = response.refreshToken,
             expiresAtEpochMillis = expiresAt(response.expiresIn),
         )
+        AppLogger.debug("refreshSession: 刷新成功，新 token 已持久化")
         return sessionMutex.withLock {
             if (sessionStore.read()?.refreshToken != session.refreshToken) return@withLock null
             refreshedSession.also { sessionStore.write(it) }

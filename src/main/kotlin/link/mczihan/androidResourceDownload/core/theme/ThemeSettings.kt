@@ -4,8 +4,10 @@ import com.materialkolor.hct.Hct
 
 data class ThemeSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    val dynamicColorEnabled: Boolean = false,
     val seedColorArgb: Int = DEFAULT_THEME_SEED_ARGB,
     val schemeVariant: ThemeSchemeVariant = ThemeSchemeVariant.TONAL_SPOT,
+    val logEnabled: Boolean = false,
 )
 
 enum class ThemeSchemeVariant(val displayName: String) {

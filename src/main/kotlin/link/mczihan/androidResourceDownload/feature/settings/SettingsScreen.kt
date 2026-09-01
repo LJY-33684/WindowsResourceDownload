@@ -5,10 +5,14 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,7 +24,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -32,13 +38,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -53,6 +63,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -62,6 +73,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,11 +83,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import link.mczihan.androidResourceDownload.core.common.RolePreview
+import link.mczihan.androidResourceDownload.domain.model.LoginType
+import link.mczihan.androidResourceDownload.domain.model.Role as UserRole
+import link.mczihan.androidResourceDownload.domain.model.User
+import link.mczihan.androidResourceDownload.feature.profile.profileAvatarUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.jetbrains.skia.Image
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import link.mczihan.androidResourceDownload.BuildConfig
 import link.mczihan.androidResourceDownload.core.ui.FastScrollbar
 import link.mczihan.androidResourceDownload.core.theme.DEFAULT_THEME_SEED_ARGB
@@ -91,10 +120,15 @@ import link.mczihan.androidResourceDownload.core.theme.themeToneFromArgb
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
+    user: User,
     themeMode: ThemeMode,
     onThemeModeChange: (ThemeMode) -> Unit,
+    themeDynamicColorEnabled: Boolean = false,
     themeSeedColorArgb: Int = DEFAULT_THEME_SEED_ARGB,
     themeSchemeVariant: ThemeSchemeVariant = ThemeSchemeVariant.TONAL_SPOT,
+    onThemeDynamicColorEnabledChange: (Boolean) -> Unit = {},
+    logEnabled: Boolean = false,
+    onLogEnabledChange: (Boolean) -> Unit = {},
     onThemeSeedColorChange: (Int) -> Unit = {},
     onThemeSchemeVariantChange: (ThemeSchemeVariant) -> Unit = {},
     onResetThemeColor: () -> Unit = {},
@@ -112,16 +146,32 @@ fun SettingsScreen(
     var showLogout by remember { mutableStateOf(false) }
     var showCustomColor by remember { mutableStateOf(false) }
     var showSchemePicker by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
+    // 检查更新有结果时弹出对话框
+    LaunchedEffect(updateState) {
+        if (updateState is UpdateUiState.Available ||
+            updateState is UpdateUiState.UpToDate ||
+            updateState is UpdateUiState.Error
+        ) {
+            showUpdateDialog = true
+        }
+    }
     val previewDarkTheme = when (themeMode) {
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
 
-    Scaffold(
-        modifier = modifier,
-        topBar = { TopAppBar(title = { Text("设置") }) },
-    ) { innerPadding ->
+    Box(modifier = modifier.fillMaxSize()) {
+
+        Scaffold(
+
+            modifier = Modifier.fillMaxSize(),
+
+            topBar = { TopAppBar(title = { Text("设置") }) },
+
+        ) { innerPadding ->
         val scrollState = rememberScrollState()
         Box(
             modifier = Modifier
@@ -133,6 +183,11 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .verticalScroll(scrollState),
             ) {
+            UserHeader(
+                user = user,
+                onRequestLogout = { showLogout = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
             Text(
                 text = "外观",
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
@@ -166,18 +221,62 @@ fun SettingsScreen(
                     }
                 }
             }
-            // Dynamic color (莫奈取色) is not supported on Windows, so it is hidden.
-            // Theme color picker is always visible.
-            ThemeColorEditor(
-                selectedSeedColorArgb = themeSeedColorArgb,
-                schemeVariant = themeSchemeVariant,
-                darkTheme = previewDarkTheme,
-                onSeedColorChange = onThemeSeedColorChange,
-                onSchemeVariant = { showSchemePicker = true },
-                onReset = onResetThemeColor,
-                onCustomColor = { showCustomColor = true },
+            // Windows 端"莫奈自动取色"：使用系统强调色（DWM 从壁纸提取，聚焦/动态壁纸均可用）。
+            ListItem(
+                headlineContent = { Text("莫奈自动取色") },
+                supportingContent = {
+                    Text(
+                        if (themeDynamicColorEnabled) {
+                            "使用系统强调色生成应用配色"
+                        } else {
+                            "使用下方选择的主题色"
+                        },
+                    )
+                },
+                leadingContent = { SettingsIcon(Icons.Default.AutoAwesome) },
+                trailingContent = {
+                    Switch(
+                        checked = themeDynamicColorEnabled,
+                        onCheckedChange = onThemeDynamicColorEnabledChange,
+                    )
+                },
+                modifier = Modifier.clickable {
+                    onThemeDynamicColorEnabledChange(!themeDynamicColorEnabled)
+                },
             )
+            // 与安卓端一致：开启自动取色时隐藏手动调色盘
+            AnimatedVisibility(
+                visible = !themeDynamicColorEnabled,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                ThemeColorEditor(
+                    selectedSeedColorArgb = themeSeedColorArgb,
+                    schemeVariant = themeSchemeVariant,
+                    darkTheme = previewDarkTheme,
+                    onSeedColorChange = onThemeSeedColorChange,
+                    onSchemeVariant = { showSchemePicker = true },
+                    onReset = onResetThemeColor,
+                    onCustomColor = { showCustomColor = true },
+                )
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ListItem(
+                headlineContent = { Text("启用日志") },
+                supportingContent = {
+                    Text(
+                        if (logEnabled) "记录运行日志到 log.txt 文件" else "日志已关闭，不再写入 log.txt",
+                    )
+                },
+                leadingContent = { SettingsIcon(Icons.Default.BugReport) },
+                trailingContent = {
+                    Switch(
+                        checked = logEnabled,
+                        onCheckedChange = onLogEnabledChange,
+                    )
+                },
+                modifier = Modifier.clickable { onLogEnabledChange(!logEnabled) },
+            )
             ListItem(
                 headlineContent = { Text("公告") },
                 supportingContent = {
@@ -194,41 +293,10 @@ fun SettingsScreen(
                 modifier = Modifier.clickable { showNotice = true },
             )
             ListItem(
-                headlineContent = { Text("检查更新") },
-                supportingContent = {
-                    Text(
-                        when (val state = updateState) {
-                            UpdateUiState.Idle -> "当前版本 ${BuildConfig.VERSION_NAME}"
-                            UpdateUiState.Checking -> "正在检查更新"
-                            is UpdateUiState.Available -> "发现新版本 ${state.latestVersion}"
-                            is UpdateUiState.UpToDate -> "当前版本 ${state.currentVersion}"
-                            is UpdateUiState.Error -> "检查失败"
-                        },
-                    )
-                },
-                leadingContent = { SettingsIcon(Icons.Default.SystemUpdate) },
-                trailingContent = if (updateState == UpdateUiState.Checking) {
-                    { CircularProgressIndicator(modifier = Modifier.size(24.dp)) }
-                } else {
-                    null
-                },
-                modifier = Modifier.clickable(
-                    enabled = updateState != UpdateUiState.Checking,
-                    onClick = onCheckUpdate,
-                ),
-            )
-            ListItem(
                 headlineContent = { Text("关于") },
-                supportingContent = { Text("版本与开源信息") },
+                supportingContent = { Text("查看资源云盘的各项信息") },
                 leadingContent = { SettingsIcon(Icons.Default.Info) },
                 modifier = Modifier.clickable { showAbout = true },
-            )
-            ListItem(
-                headlineContent = { Text("退出登录") },
-                leadingContent = {
-                    SettingsIcon(Icons.AutoMirrored.Filled.Logout, isError = true)
-                },
-                modifier = Modifier.clickable { showLogout = true },
             )
             }
             FastScrollbar(
@@ -236,6 +304,22 @@ fun SettingsScreen(
                 modifier = Modifier.align(Alignment.CenterEnd),
             )
         }
+    }
+
+    if (showLogout) {
+        AlertDialog(
+            onDismissRequest = { showLogout = false },
+            title = { Text("退出登录？") },
+            text = { Text("退出后需要重新验证身份。") },
+            confirmButton = {
+                TextButton(onClick = onLogout) {
+                    Text("退出", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogout = false }) { Text("取消") }
+            },
+        )
     }
 
     if (showNotice) {
@@ -257,7 +341,7 @@ fun SettingsScreen(
                             Spacer(Modifier.width(12.dp))
                             Text("正在获取最新公告")
                         }
-                        is NoticeUiState.Content -> Text(state.text)
+                        is NoticeUiState.Content -> MarkdownText(state.text)
                         NoticeUiState.Empty -> Text("暂无公告")
                         NoticeUiState.Error -> Text("公告获取失败，请检查网络后重试。")
                     }
@@ -281,54 +365,84 @@ fun SettingsScreen(
     }
 
     if (showAbout) {
-        AlertDialog(
-            onDismissRequest = { showAbout = false },
-            title = { Text("关于资源下载") },
-            text = {
-                Text("版本 ${BuildConfig.VERSION_NAME}\n用于访问团队文件和管理下载任务。")
-            },
-            confirmButton = {
-                TextButton(onClick = { showAbout = false }) { Text("确定") }
-            },
+        AboutScreen(
+            onNavigateBack = { showAbout = false },
+            updateState = updateState,
+            onCheckUpdate = onCheckUpdate,
+            onDismissUpdate = onDismissUpdate,
+            onOpenUrl = onOpenUpdateUrl,
         )
     }
 
-    if (!showAbout && !showNotice && !showLogout && !showCustomColor && !showSchemePicker) {
+    if (showUpdateDialog && !showAbout && !showNotice && !showCustomColor && !showSchemePicker) {
+        val dismiss = { showUpdateDialog = false; onDismissUpdate() }
         when (val state = updateState) {
             is UpdateUiState.Available -> AlertDialog(
-                onDismissRequest = onDismissUpdate,
+                onDismissRequest = dismiss,
                 title = { Text("发现新版本") },
                 text = {
-                    Text("当前版本 ${state.currentVersion}\n最新版本 ${state.latestVersion}")
+                    Column {
+                        Text("当前版本 ${state.currentVersion}\n最新版本 ${state.latestVersion}")
+                        if (!state.releaseNotes.isNullOrBlank()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("更新内容", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 280.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                MarkdownText(state.releaseNotes, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
                 },
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            if (onOpenUpdateUrl(state.updateUrl)) onDismissUpdate()
+                            if (onOpenUpdateUrl(state.updateUrl)) dismiss()
                         },
                     ) { Text("下载") }
                 },
                 dismissButton = {
-                    TextButton(onClick = onDismissUpdate) { Text("取消") }
+                    TextButton(onClick = dismiss) { Text("取消") }
                 },
             )
             is UpdateUiState.UpToDate -> AlertDialog(
-                onDismissRequest = onDismissUpdate,
+                onDismissRequest = dismiss,
                 title = { Text("已是最新版本") },
-                text = { Text("当前版本 ${state.currentVersion}") },
+                text = {
+                    Column {
+                        Text("当前版本 ${state.currentVersion}")
+                        if (!state.releaseNotes.isNullOrBlank()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("当前版本更新内容", style = MaterialTheme.typography.titleSmall)
+                            Spacer(Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 280.dp)
+                                    .verticalScroll(rememberScrollState()),
+                            ) {
+                                MarkdownText(state.releaseNotes, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                },
                 confirmButton = {
-                    TextButton(onClick = onDismissUpdate) { Text("确定") }
+                    TextButton(onClick = dismiss) { Text("确定") }
                 },
             )
             is UpdateUiState.Error -> AlertDialog(
-                onDismissRequest = onDismissUpdate,
+                onDismissRequest = dismiss,
                 title = { Text("检查更新失败") },
                 text = { Text(state.message) },
                 confirmButton = {
-                    TextButton(onClick = onCheckUpdate) { Text("重试") }
+                    TextButton(onClick = { showUpdateDialog = false; onCheckUpdate() }) { Text("重试") }
                 },
                 dismissButton = {
-                    TextButton(onClick = onDismissUpdate) { Text("取消") }
+                    TextButton(onClick = dismiss) { Text("取消") }
                 },
             )
             UpdateUiState.Idle,
@@ -337,19 +451,7 @@ fun SettingsScreen(
         }
     }
 
-    if (showLogout) {
-        AlertDialog(
-            onDismissRequest = { showLogout = false },
-            title = { Text("退出登录？") },
-            text = { Text("退出后需要重新验证身份。") },
-            confirmButton = {
-                TextButton(onClick = onLogout) { Text("退出") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLogout = false }) { Text("取消") }
-            },
-        )
-    }
+
 
     if (showCustomColor) {
         CustomThemeColorDialog(
@@ -373,6 +475,7 @@ fun SettingsScreen(
                 showSchemePicker = false
             },
         )
+    }
     }
 }
 
@@ -763,4 +866,265 @@ private fun ThemeSeedPreset.label(): String = when (this) {
     ThemeSeedPreset.MINT -> "薄荷"
     ThemeSeedPreset.ROSE -> "玫瑰"
     ThemeSeedPreset.VIOLET -> "紫罗兰"
+    }
+
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun UserHeader(
+    user: User,
+    onRequestLogout: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var avatarBitmap by remember(user.avatarUrl) { mutableStateOf<ImageBitmap?>(null) }
+    var showRoleConfirm by remember { mutableStateOf(false) }
+    var roleNotice by remember { mutableStateOf<String?>(null) }
+    val roleInteractionSource = remember { MutableInteractionSource() }
+    val density = LocalDensity.current
+    val roleHovered by roleInteractionSource.collectIsHoveredAsState()
+    val effectiveRoleAdmin = user.role == UserRole.ADMIN && !RolePreview.asUser
+    LaunchedEffect(user.avatarUrl) {
+        val url = user.profileAvatarUrl()
+        avatarBitmap = if (url != null) {
+            withContext(Dispatchers.IO) { loadAvatar(url) }
+        } else {
+            null
+        }
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(80.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        val bitmap = avatarBitmap
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = user.name ?: "未登录",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box {
+                            Surface(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .then(
+                                        if (user.role == UserRole.ADMIN) {
+                                            Modifier
+                                                .hoverable(roleInteractionSource)
+                                                .clickable { showRoleConfirm = true }
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                                shape = CircleShape,
+                                color = if (effectiveRoleAdmin) {
+                                    MaterialTheme.colorScheme.tertiaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                },
+                            ) {
+                                Text(
+                                    text = if (effectiveRoleAdmin) "管理员" else "普通用户",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    color = if (effectiveRoleAdmin) {
+                                        MaterialTheme.colorScheme.onTertiaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                            // 仅管理员悬停时显示切换提示（浮窗，不挤占布局）
+                            if (user.role == UserRole.ADMIN && roleHovered) {
+                                Popup(
+                                    alignment = Alignment.TopCenter,
+                                    offset = IntOffset(
+                                        x = 0,
+                                        y = with(density) { (-14).dp.roundToPx() },
+                                    ),
+                                    onDismissRequest = {},
+                                ) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.inverseSurface,
+                                        shadowElevation = 4.dp,
+                                    ) {
+                                        Text(
+                                            text = "单击可切换用户",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            color = MaterialTheme.colorScheme.inverseOnSurface,
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable(onClick = onRequestLogout),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Logout,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text("退出登录", style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Key,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "登录方式 ${when (user.loginType) {
+                            LoginType.GITHUB -> "GitHub"
+                            LoginType.EMAIL -> "邮箱验证码"
+                            LoginType.QQ -> "QQ"
+                        }}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        text = "v${BuildConfig.VERSION_NAME}",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showRoleConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRoleConfirm = false },
+            title = { Text(if (RolePreview.asUser) "恢复管理员视角" else "切换为普通用户视角") },
+            text = {
+                Text(
+                    if (RolePreview.asUser) {
+                        "将恢复管理员视角，重新显示全部管理员功能。是否继续？"
+                    } else {
+                        "将以普通用户视角预览界面（隐藏上传、复选、拖拽上传等管理员功能）。是否继续？"
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRoleConfirm = false
+                    val nowPreview = RolePreview.toggle()
+                    roleNotice = if (nowPreview) {
+                        "已切换为普通用户视角，再次点击角色标记或重启应用可恢复"
+                    } else {
+                        "已恢复管理员视角"
+                    }
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRoleConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+    roleNotice?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { roleNotice = null },
+            title = { Text("提示") },
+            text = { Text(notice) },
+            confirmButton = {
+                TextButton(onClick = { roleNotice = null }) { Text("知道了") }
+            },
+        )
+    }
 }
+
+private suspend fun loadAvatar(url: String): ImageBitmap? {
+    return try {
+        val client = OkHttpClient.Builder()
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .proxySelector(java.net.ProxySelector.getDefault())
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        val request = Request.Builder().url(url).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@use null
+            val bytes = response.body?.bytes() ?: return@use null
+            Image.makeFromEncoded(bytes).asImageBitmap()
+        }
+    } catch (error: Exception) {
+        link.mczihan.androidResourceDownload.core.platform.AppLogger.debug("Settings avatar 加载失败: ${error.message}")
+        null
+    }
+}
+

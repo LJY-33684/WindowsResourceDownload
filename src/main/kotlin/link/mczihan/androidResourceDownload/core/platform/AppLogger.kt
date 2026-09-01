@@ -16,6 +16,10 @@ object AppLogger {
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
     private val lock = ReentrantLock()
+
+    /** When false, log lines are still printed to console but not written to log.txt. */
+    @Volatile
+    var fileEnabled: Boolean = true
     private var logFile: File? = null
     private var initialized = false
 
@@ -53,6 +57,7 @@ object AppLogger {
         // Write to file
         lock.withLock {
             if (!initialized) return
+            if (!fileEnabled) return
             try {
                 logFile?.appendText(line)
             } catch (_: Exception) { }

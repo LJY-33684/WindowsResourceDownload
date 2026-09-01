@@ -1,8 +1,12 @@
 package link.mczihan.androidResourceDownload.app
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -10,9 +14,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -22,22 +26,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import java.awt.Desktop
+import java.net.URI
 import link.mczihan.androidResourceDownload.core.theme.AndroidResourceDownloadTheme
 import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
-import link.mczihan.androidResourceDownload.domain.model.DownloadTask
-import link.mczihan.androidResourceDownload.domain.model.FileNode
+import link.mczihan.androidResourceDownload.domain.model.Role
+import link.mczihan.androidResourceDownload.core.common.RolePreview
+import link.mczihan.androidResourceDownload.core.theme.ThemeMode
+import link.mczihan.androidResourceDownload.core.theme.ThemeSchemeVariant
+import link.mczihan.androidResourceDownload.domain.model.User
 import link.mczihan.androidResourceDownload.feature.auth.AuthUiState
 import link.mczihan.androidResourceDownload.feature.auth.AuthViewModel
 import link.mczihan.androidResourceDownload.feature.auth.EmailVerificationScreen
@@ -53,25 +59,17 @@ import link.mczihan.androidResourceDownload.feature.settings.SettingsViewModel
 import link.mczihan.androidResourceDownload.feature.settings.ThemeViewModel
 import link.mczihan.androidResourceDownload.feature.uploads.UploadsScreen
 import link.mczihan.androidResourceDownload.feature.uploads.UploadsViewModel
-import java.awt.Desktop
-import java.net.URI
 
-private object RootRoute {
-    const val Login = "login"
-    const val Email = "email"
-    const val Main = "main"
-    const val Profile = "profile"
-}
+private enum class RootScreen { Login, Email, Main, Profile }
 
 private enum class ShellRoute(
-    val route: String,
     val label: String,
     val adminOnly: Boolean = false,
 ) {
-    Files("files", "文件"),
-    Uploads("uploads", "上传", adminOnly = true),
-    Downloads("downloads", "下载"),
-    Settings("settings", "设置"),
+    Files("文件"),
+    Uploads("上传", adminOnly = true),
+    Downloads("下载"),
+    Settings("设置"),
 }
 
 @Composable
@@ -84,6 +82,7 @@ fun AndroidResourceDownloadRoot(
     profileViewModel: ProfileViewModel,
     settingsViewModel: SettingsViewModel,
     onOpenGithubLogin: () -> Unit,
+    onOpenQqLogin: () -> Unit,
 ) {
     val themeMode by themeViewModel.themeMode.collectAsState()
     val themeSettings by themeViewModel.settings.collectAsState()
@@ -92,6 +91,7 @@ fun AndroidResourceDownloadRoot(
 
     AndroidResourceDownloadTheme(
         themeMode = themeMode,
+        dynamicColorEnabled = themeSettings.dynamicColorEnabled,
         seedColorArgb = themeSettings.seedColorArgb,
         schemeVariant = themeSettings.schemeVariant,
     ) {
@@ -99,73 +99,62 @@ fun AndroidResourceDownloadRoot(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
         ) {
-            val navController = rememberNavController()
+            var rootScreen by remember { mutableStateOf(RootScreen.Login) }
+
             LaunchedEffect(authState) {
-                when (authState) {
-                    is AuthUiState.Authenticated -> navController.navigate(RootRoute.Main) {
-                        popUpTo(RootRoute.Login) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                    AuthUiState.Anonymous -> navController.navigate(RootRoute.Login) {
-                        popUpTo(navController.graph.id) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                    else -> Unit
+                rootScreen = when (authState) {
+                    is AuthUiState.Authenticated -> RootScreen.Main
+                    AuthUiState.Anonymous -> RootScreen.Login
+                    else -> rootScreen
                 }
             }
-            NavHost(
-                navController = navController,
-                startDestination = RootRoute.Login,
-            ) {
-                composable(RootRoute.Login) {
-                    LoginScreen(
-                        onGithubLogin = {
-                            onOpenGithubLogin()
-                        },
-                        onEmailLogin = { navController.navigate(RootRoute.Email) },
-                        busy = authState is AuthUiState.Restoring ||
-                            authState is AuthUiState.Authenticating ||
-                            authState is AuthUiState.LoggingOut,
-                        message = (authState as? AuthUiState.Error)?.message,
-                        onPolicyAccepted = authViewModel::acceptPrivacyPolicy,
-                    )
-                }
-                composable(RootRoute.Email) {
-                    EmailVerificationScreen(
-                        onBack = { navController.popBackStack() },
-                        onVerified = { _, _ -> },
-                        onRequestCode = authViewModel::requestCode,
-                        onLogin = authViewModel::loginWithEmail,
-                        busy = authState is AuthUiState.SendingCode ||
-                            authState is AuthUiState.Authenticating ||
-                            authState is AuthUiState.LoggingOut,
-                        message = (authState as? AuthUiState.Error)?.message,
-                        codeSentEmail = when (val state = authState) {
-                            is AuthUiState.AwaitingCode -> state.email
-                            is AuthUiState.Error -> (state.recoverableState as? AuthUiState.AwaitingCode)?.email
-                            else -> null
-                        },
-                    )
-                }
-                composable(RootRoute.Main) {
+
+            when (rootScreen) {
+                RootScreen.Login -> LoginScreen(
+                    onGithubLogin = { onOpenGithubLogin() },
+                    onQqLogin = { onOpenQqLogin() },
+                    onEmailLogin = { rootScreen = RootScreen.Email },
+                    busy = authState is AuthUiState.Restoring ||
+                        authState is AuthUiState.Authenticating ||
+                        authState is AuthUiState.LoggingOut,
+                    message = (authState as? AuthUiState.Error)?.message,
+                    onPolicyAccepted = authViewModel::acceptPrivacyPolicy,
+                )
+                RootScreen.Email -> EmailVerificationScreen(
+                    onBack = { rootScreen = RootScreen.Login },
+                    onVerified = { _, _ -> },
+                    onRequestCode = authViewModel::requestCode,
+                    onLogin = authViewModel::loginWithEmail,
+                    busy = authState is AuthUiState.SendingCode ||
+                        authState is AuthUiState.Authenticating ||
+                        authState is AuthUiState.LoggingOut,
+                    message = (authState as? AuthUiState.Error)?.message,
+                    codeSentEmail = when (val state = authState) {
+                        is AuthUiState.AwaitingCode -> state.email
+                        is AuthUiState.Error -> (state.recoverableState as? AuthUiState.AwaitingCode)?.email
+                        else -> null
+                    },
+                )
+                RootScreen.Main -> {
                     val user = (authState as? AuthUiState.Authenticated)?.session?.user
-                    if (user == null) {
-                        LaunchedEffect(Unit) {
-                            navController.navigate(RootRoute.Login) {
-                                popUpTo(RootRoute.Main) { inclusive = true }
-                            }
-                        }
-                    } else {
+                    LaunchedEffect(user) {
+                        if (user == null) rootScreen = RootScreen.Login
+                    }
+                    if (user != null) {
                         MainShell(
                             user = user,
                             themeMode = themeMode,
+                            themeDynamicColorEnabled = themeSettings.dynamicColorEnabled,
                             themeSeedColorArgb = themeSettings.seedColorArgb,
                             themeSchemeVariant = themeSettings.schemeVariant,
                             onThemeModeChange = themeViewModel::setThemeMode,
+                            onThemeDynamicColorEnabledChange = themeViewModel::setDynamicColorEnabled,
+                            logEnabled = themeSettings.logEnabled,
+                            onLogEnabledChange = themeViewModel::setLogEnabled,
                             onThemeSeedColorChange = themeViewModel::setSeedColor,
                             onThemeSchemeVariantChange = themeViewModel::setSchemeVariant,
                             onResetThemeColor = themeViewModel::resetThemeColor,
-                            onProfile = { navController.navigate(RootRoute.Profile) },
+                            onProfile = { rootScreen = RootScreen.Profile },
                             onLogout = { authViewModel.logout() },
                             filesViewModel = filesViewModel,
                             downloadsViewModel = downloadsViewModel,
@@ -174,11 +163,12 @@ fun AndroidResourceDownloadRoot(
                         )
                     }
                 }
-                composable(RootRoute.Profile) {
+                RootScreen.Profile -> {
                     val user = (authState as? AuthUiState.Authenticated)?.session?.user
-                    if (user == null) {
-                        LaunchedEffect(Unit) { navController.popBackStack() }
-                    } else {
+                    LaunchedEffect(user) {
+                        if (user == null) rootScreen = RootScreen.Login
+                    }
+                    if (user != null) {
                         val qqNickname by profileViewModel.qqNickname.collectAsState()
                         LaunchedEffect(
                             user.id,
@@ -196,7 +186,7 @@ fun AndroidResourceDownloadRoot(
                             user = user,
                             qqNickname = qqNickname,
                             allowQqLookup = privacyConsentAccepted,
-                            onBack = { navController.popBackStack() },
+                            onBack = { rootScreen = RootScreen.Main },
                             onLogout = { authViewModel.logout() },
                         )
                     }
@@ -208,13 +198,17 @@ fun AndroidResourceDownloadRoot(
 
 @Composable
 private fun MainShell(
-    user: link.mczihan.androidResourceDownload.domain.model.User,
-    themeMode: link.mczihan.androidResourceDownload.core.theme.ThemeMode,
+    user: User,
+    themeMode: ThemeMode,
+    themeDynamicColorEnabled: Boolean,
     themeSeedColorArgb: Int,
-    themeSchemeVariant: link.mczihan.androidResourceDownload.core.theme.ThemeSchemeVariant,
-    onThemeModeChange: (link.mczihan.androidResourceDownload.core.theme.ThemeMode) -> Unit,
+    themeSchemeVariant: ThemeSchemeVariant,
+    onThemeModeChange: (ThemeMode) -> Unit,
+    onThemeDynamicColorEnabledChange: (Boolean) -> Unit,
+    logEnabled: Boolean,
+    onLogEnabledChange: (Boolean) -> Unit,
     onThemeSeedColorChange: (Int) -> Unit,
-    onThemeSchemeVariantChange: (link.mczihan.androidResourceDownload.core.theme.ThemeSchemeVariant) -> Unit,
+    onThemeSchemeVariantChange: (ThemeSchemeVariant) -> Unit,
     onResetThemeColor: () -> Unit,
     onProfile: () -> Unit,
     onLogout: () -> Unit,
@@ -223,10 +217,8 @@ private fun MainShell(
     uploadsViewModel: UploadsViewModel,
     settingsViewModel: SettingsViewModel,
 ) {
-    val isAdmin = user.role == link.mczihan.androidResourceDownload.domain.model.Role.ADMIN
-    val navController = rememberNavController()
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry?.destination?.route
+    val isAdmin = user.role == Role.ADMIN && !RolePreview.asUser
+    var currentTab by remember { mutableStateOf(ShellRoute.Files) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val tasks by downloadsViewModel.tasks.collectAsState()
@@ -254,14 +246,13 @@ private fun MainShell(
         uploadsViewModel.messages.collect(::showMessage)
     }
 
-    // Start speed tracking when on downloads/uploads tab, stop when leaving
-    LaunchedEffect(currentRoute) {
-        if (currentRoute == ShellRoute.Downloads.route) {
+    LaunchedEffect(currentTab) {
+        if (currentTab == ShellRoute.Downloads) {
             downloadsViewModel.startSpeedTracking()
         } else {
             downloadsViewModel.stopSpeedTracking()
         }
-        if (currentRoute == ShellRoute.Uploads.route) {
+        if (currentTab == ShellRoute.Uploads) {
             uploadsViewModel.startSpeedTracking()
         } else {
             uploadsViewModel.stopSpeedTracking()
@@ -270,141 +261,141 @@ private fun MainShell(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            NavigationBar(
+    ) { shellPadding ->
+        Row(
+            modifier = Modifier.fillMaxSize().padding(shellPadding),
+        ) {
+            NavigationRail(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 0.dp,
             ) {
                 ShellRoute.values()
                     .filter { destination -> !destination.adminOnly || isAdmin }
                     .forEach { destination ->
-                    val selected = currentRoute == destination.route
-                    val iconScale by animateFloatAsState(
-                        targetValue = if (selected) 1.16f else 1f,
-                        label = "navigationIconScale",
-                    )
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = when (destination) {
-                                    ShellRoute.Files -> Icons.Default.Folder
-                                    ShellRoute.Uploads -> Icons.Default.UploadFile
-                                    ShellRoute.Downloads -> Icons.Default.Download
-                                    ShellRoute.Settings -> Icons.Default.Settings
-                                },
-                                contentDescription = destination.label,
-                                modifier = Modifier.graphicsLayer {
-                                    scaleX = iconScale
-                                    scaleY = iconScale
-                                },
-                            )
-                        },
-                        label = { Text(destination.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                        ),
-                    )
-                }
+                        val selected = currentTab == destination
+                        val iconScale by animateFloatAsState(
+                            targetValue = if (selected) 1.16f else 1f,
+                            label = "navigationIconScale",
+                        )
+                        NavigationRailItem(
+                            selected = selected,
+                            onClick = { currentTab = destination },
+                            modifier = Modifier.padding(vertical = 14.dp),
+                            icon = {
+                                Icon(
+                                    imageVector = when (destination) {
+                                        ShellRoute.Files -> Icons.Default.Folder
+                                        ShellRoute.Uploads -> Icons.Default.UploadFile
+                                        ShellRoute.Downloads -> Icons.Default.Download
+                                        ShellRoute.Settings -> Icons.Default.Settings
+                                    },
+                                    contentDescription = destination.label,
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = iconScale
+                                        scaleY = iconScale
+                                    },
+                                )
+                            },
+                            label = { Text(destination.label) },
+                            colors = NavigationRailItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                            ),
+                        )
+                    }
             }
-        },
-    ) { shellPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = ShellRoute.Files.route,
-            modifier = Modifier.padding(shellPadding),
-        ) {
-            composable(ShellRoute.Files.route) {
-                FilesScreen(
-                    viewModel = filesViewModel,
-                    role = user.role,
-                    onProfile = onProfile,
-                    onDownload = { file, relativePath -> downloadsViewModel.enqueue(file, relativePath) },
-                    onUploadFiles = { files, destination ->
-                        uploadsViewModel.enqueueFiles(files, destination)
-                        navController.navigate(ShellRoute.Uploads.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onUploadDirectory = { dir, destination ->
-                        uploadsViewModel.enqueueDirectory(dir, destination)
-                        navController.navigate(ShellRoute.Uploads.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onMessage = ::showMessage,
-                )
+            Box(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+            ) {
+                when (currentTab) {
+            ShellRoute.Files -> FilesScreen(
+                viewModel = filesViewModel,
+                role = user.role,
+                onDownload = { file, relativePath -> downloadsViewModel.enqueue(file, relativePath) },
+                onUploadFiles = { files, destination ->
+                    uploadsViewModel.enqueueFiles(files, destination)
+                    currentTab = ShellRoute.Uploads
+                },
+                onUploadDirectory = { dir, destination ->
+                    uploadsViewModel.enqueueDirectory(dir, destination)
+                    currentTab = ShellRoute.Uploads
+                },
+                onMessage = ::showMessage,
+                modifier = Modifier.fillMaxSize(),
+            )
+            ShellRoute.Uploads -> UploadsScreen(
+                tasks = uploadTasks,
+                currentSpeeds = uploadSpeeds,
+                preparingSelections = preparingUploads,
+                onRetry = uploadsViewModel::retry,
+                onCancel = uploadsViewModel::cancel,
+                onDelete = uploadsViewModel::delete,
+                onCancelAll = uploadsViewModel::cancelAll,
+                onClearTerminal = uploadsViewModel::clearTerminal,
+                modifier = Modifier.fillMaxSize(),
+            )
+            ShellRoute.Downloads -> DownloadsScreen(
+                tasks = tasks,
+                currentSpeeds = currentSpeeds,
+                onStatusChange = { taskId, status ->
+                    when (status) {
+                        DownloadStatus.RUNNING -> downloadsViewModel.retry(taskId)
+                        DownloadStatus.PAUSED -> downloadsViewModel.pause(taskId)
+                        DownloadStatus.CANCELLED -> downloadsViewModel.cancel(taskId)
+                        else -> Unit
+                    }
+                },
+                onOpen = { task -> downloadsViewModel.open(task) },
+                onDelete = { taskId -> downloadsViewModel.delete(taskId) },
+                onDeleteWithOption = { taskId, deleteLocalFile ->
+                    downloadsViewModel.delete(taskId, deleteLocalFile)
+                },
+                onCancelAll = { downloadsViewModel.cancelAll() },
+                onClearTerminal = { deleteLocalFiles ->
+                    downloadsViewModel.clearTerminal(deleteLocalFiles)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            ShellRoute.Settings -> SettingsScreen(
+                user = user,
+                themeMode = themeMode,
+                onThemeModeChange = onThemeModeChange,
+                themeDynamicColorEnabled = themeDynamicColorEnabled,
+                themeSeedColorArgb = themeSeedColorArgb,
+                themeSchemeVariant = themeSchemeVariant,
+                onThemeDynamicColorEnabledChange = onThemeDynamicColorEnabledChange,
+                logEnabled = logEnabled,
+                onLogEnabledChange = onLogEnabledChange,
+                onThemeSeedColorChange = onThemeSeedColorChange,
+                onThemeSchemeVariantChange = onThemeSchemeVariantChange,
+                onResetThemeColor = onResetThemeColor,
+                noticeState = noticeState,
+                updateState = updateState,
+                onRetryNotice = settingsViewModel::refreshNotice,
+                onCheckUpdate = settingsViewModel::checkForUpdate,
+                onDismissUpdate = settingsViewModel::dismissUpdateResult,
+                onOpenUpdateUrl = ::openUrlInBrowser,
+                onLogout = onLogout,
+                modifier = Modifier.fillMaxSize(),
+            )
             }
-            composable(ShellRoute.Uploads.route) {
-                UploadsScreen(
-                    tasks = uploadTasks,
-                    currentSpeeds = uploadSpeeds,
-                    preparingSelections = preparingUploads,
-                    onRetry = uploadsViewModel::retry,
-                    onCancel = uploadsViewModel::cancel,
-                    onDelete = uploadsViewModel::delete,
-                    onCancelAll = uploadsViewModel::cancelAll,
-                    onClearTerminal = uploadsViewModel::clearTerminal,
-                )
             }
-            composable(ShellRoute.Downloads.route) {
-                DownloadsScreen(
-                    tasks = tasks,
-                    currentSpeeds = currentSpeeds,
-                    onStatusChange = { taskId, status ->
-                        when (status) {
-                            DownloadStatus.RUNNING -> downloadsViewModel.retry(taskId)
-                            DownloadStatus.PAUSED -> downloadsViewModel.pause(taskId)
-                            DownloadStatus.CANCELLED -> downloadsViewModel.cancel(taskId)
-                            else -> Unit
-                        }
-                    },
-                    onOpen = { task -> downloadsViewModel.open(task) },
-                    onDelete = { taskId -> downloadsViewModel.delete(taskId) },
-                    onDeleteWithOption = { taskId, deleteLocalFile ->
-                        downloadsViewModel.delete(taskId, deleteLocalFile)
-                    },
-                    onCancelAll = { downloadsViewModel.cancelAll() },
-                    onClearTerminal = { deleteLocalFiles ->
-                        downloadsViewModel.clearTerminal(deleteLocalFiles)
-                    },
-                )
-            }
-            composable(ShellRoute.Settings.route) {
-                SettingsScreen(
-                    themeMode = themeMode,
-                    onThemeModeChange = onThemeModeChange,
-                    themeSeedColorArgb = themeSeedColorArgb,
-                    themeSchemeVariant = themeSchemeVariant,
-                    onThemeSeedColorChange = onThemeSeedColorChange,
-                    onThemeSchemeVariantChange = onThemeSchemeVariantChange,
-                    onResetThemeColor = onResetThemeColor,
-                    noticeState = noticeState,
-                    onRetryNotice = settingsViewModel::refreshNotice,
-                    updateState = updateState,
-                    onCheckUpdate = settingsViewModel::checkForUpdate,
-                    onDismissUpdate = settingsViewModel::dismissUpdateResult,
-                    onOpenUpdateUrl = { url ->
-                        runCatching {
-                            Desktop.getDesktop().browse(URI(url))
-                        }.isSuccess
-                    },
-                    onLogout = onLogout,
-                )
-            }
+        }
+    }
+}
+
+private fun openUrlInBrowser(url: String): Boolean {
+    return try {
+        if (Desktop.isDesktopSupported()) {
+            Desktop.getDesktop().browse(URI(url))
+            true
+        } else {
+            false
+        }
+    } catch (_: Exception) {
+        try {
+            ProcessBuilder("rundll32", "url.dll,FileProtocolHandler", url).start()
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 }

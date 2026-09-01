@@ -27,8 +27,9 @@ sealed interface UpdateUiState {
         val currentVersion: String,
         val latestVersion: String,
         val updateUrl: String,
+        val releaseNotes: String?,
     ) : UpdateUiState
-    data class UpToDate(val currentVersion: String) : UpdateUiState
+    data class UpToDate(val currentVersion: String, val releaseNotes: String?) : UpdateUiState
     data class Error(val message: String) : UpdateUiState
 }
 
@@ -78,9 +79,10 @@ class SettingsViewModel(
     }
 
     fun dismissUpdateResult() {
-        if (_updateState.value != UpdateUiState.Checking) {
-            _updateState.value = UpdateUiState.Idle
-        }
+        if (_updateState.value == UpdateUiState.Checking) return
+        // Available 状态保持不变，让"发现新版本"提示持续显示
+        if (_updateState.value is UpdateUiState.Available) return
+        _updateState.value = UpdateUiState.Idle
     }
 }
 
@@ -95,8 +97,9 @@ internal fun resolveUpdateState(
             currentVersion = currentVersion,
             latestVersion = manifest.latestVersion,
             updateUrl = manifest.updateUrl,
+            releaseNotes = manifest.releaseNotes,
         )
     } else {
-        UpdateUiState.UpToDate(currentVersion)
+        UpdateUiState.UpToDate(currentVersion, manifest.releaseNotes)
     }
 }

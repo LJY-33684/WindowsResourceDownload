@@ -1,7 +1,7 @@
 package link.mczihan.androidResourceDownload.core.common
 
-import java.text.DateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
 import java.util.Locale
 
 fun formatFileSize(bytes: Long?): String {
@@ -20,6 +20,11 @@ fun formatFileSize(bytes: Long?): String {
 
 fun formatDate(epochMillis: Long?): String {
     if (epochMillis == null) return "--"
-    return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-        .format(Date(epochMillis))
+    // 使用中文格式，与安卓端一致：2026年8月29日 下午9:42
+    val zoned = Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault())
+    val hour = zoned.hour
+    val period = if (hour < 12) "上午" else "下午"
+    val displayHour = ((hour + 11) % 12) + 1
+    val minute = zoned.minute.toString().padStart(2, '0')
+    return "${zoned.year}年${zoned.monthValue}月${zoned.dayOfMonth}日 $period $displayHour:$minute"
 }

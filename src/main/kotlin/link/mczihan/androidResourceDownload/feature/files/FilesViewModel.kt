@@ -1,8 +1,9 @@
-package link.mczihan.androidResourceDownload.feature.files
+﻿package link.mczihan.androidResourceDownload.feature.files
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
+import java.util.Collections
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -13,8 +14,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.data.file.FileRepository
+import link.mczihan.androidResourceDownload.data.settings.DesktopThemeRepository
 import link.mczihan.androidResourceDownload.data.file.TextEncodingException
 import link.mczihan.androidResourceDownload.data.file.UploadDocument
 import link.mczihan.androidResourceDownload.data.file.WindowsFileUploadSource
@@ -37,6 +40,167 @@ sealed interface FilesUiState {
     data class Error(override val path: WebDavPath, val message: String, val unauthorized: Boolean = false) : FilesUiState
 }
 
+
+enum class FileSearchScope {
+    ROOT,
+    CURRENT_DIRECTORY,
+    SELECTED,
+}
+
+data class FileSearchRequest(
+    val query: String,
+    val scope: FileSearchScope,
+    val basePath: WebDavPath,
+    val selectedFiles: List<FileNode> = emptyList(),
+    val includeUploadTemporary: Boolean = true,
+)
+
+sealed interface FileSearchUiState {
+    data object Idle : FileSearchUiState
+    data class Loading(
+        val request: FileSearchRequest,
+        val scannedDirectories: Int,
+        val files: List<FileNode> = emptyList(),
+        val incomplete: Boolean = false,
+        val progressVersion: Int = 0,
+        val visibleFileCount: Int = 0,
+    ) : FileSearchUiState
+    data class Success(
+        val request: FileSearchRequest,
+        val files: List<FileNode>,
+        val incomplete: Boolean,
+    ) : FileSearchUiState
+    data class Empty(
+        val request: FileSearchRequest,
+        val incomplete: Boolean,
+    ) : FileSearchUiState
+    data class Error(
+        val request: FileSearchRequest,
+        val message: String,
+    ) : FileSearchUiState
+}
+
+internal data class RecursiveFileSearchResult(
+    val files: List<FileNode>,
+    val incomplete: Boolean,
+)
+
+internal data class RecursiveFileSearchProgress(
+    val scannedDirectories: Int,
+    val files: List<FileNode>,
+    val incomplete: Boolean,
+    val progressVersion: Int,
+    val visibleFileCount: Int,
+)
+
+internal suspend fun searchFilesRecursively(
+    request: FileSearchRequest,
+    listDirectory: suspend (WebDavPath) -> List<FileNode>,
+    onProgress: (RecursiveFileSearchProgress) -> Unit = {},
+): RecursiveFileSearchResult {
+    require(request.query.isNotBlank())
+    val directories = ArrayDeque<WebDavPath>()
+    val visitedDirectories = mutableSetOf<WebDavPath>()
+    val visitedResources = mutableSetOf<WebDavPath>()
+    val matches = mutableListOf<FileNode>()
+    val publishedMatches: List<FileNode> = Collections.unmodifiableList(matches)
+    var incomplete = false
+    var progressVersion = 0
+    suspend fun publishProgress() {
+        progressVersion++
+        onProgress(
+            RecursiveFileSearchProgress(
+                scannedDirectories = visitedDirectories.size,
+                files = publishedMatches,
+                incomplete = incomplete,
+                progressVersion = progressVersion,
+                visibleFileCount = matches.size,
+            ),
+        )
+        yield()
+    }
+    if (request.scope == FileSearchScope.SELECTED) {
+        require(request.selectedFiles.isNotEmpty())
+        request.selectedFiles.forEach { file ->
+            val path = try {
+                WebDavPath.parseDecoded(file.path)
+            } catch (_: Exception) {
+                incomplete = true
+                publishProgress()
+                return@forEach
+            }
+            if (!visitedResources.add(path)) return@forEach
+            if (
+                (request.includeUploadTemporary || !file.isUploadTemporary) &&
+                file.name.contains(request.query, ignoreCase = true)
+            ) {
+                matches += file
+                publishProgress()
+            }
+            if (file.isDirectory) directories.addLast(path)
+        }
+    } else {
+        directories.add(request.basePath)
+    }
+
+    while (directories.isNotEmpty()) {
+        val directory = directories.removeFirst()
+        if (!visitedDirectories.add(directory)) continue
+        val items = try {
+            listDirectory(directory)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: WebDavException.AuthenticationRequired) {
+            throw error
+        } catch (error: WebDavException.CredentialUnavailable) {
+            throw error
+        } catch (error: WebDavException.Network) {
+            throw error
+        } catch (error: WebDavException.InvalidResponse) {
+            throw error
+        } catch (error: WebDavException.ResponseTooLarge) {
+            throw error
+        } catch (error: Exception) {
+            if (request.scope != FileSearchScope.SELECTED && directory == request.basePath) {
+                throw error
+            }
+            incomplete = true
+            publishProgress()
+            continue
+        }
+        publishProgress()
+
+        items.forEach { item ->
+            val itemPath = try {
+                WebDavPath.parseDecoded(item.path)
+            } catch (_: Exception) {
+                incomplete = true
+                publishProgress()
+                return@forEach
+            }
+            val isDirectChild = itemPath.decodedSegments.size == directory.decodedSegments.size + 1 &&
+                itemPath.decodedSegments.dropLast(1) == directory.decodedSegments
+            if (!isDirectChild || !visitedResources.add(itemPath)) {
+                if (!isDirectChild) {
+                    incomplete = true
+                    publishProgress()
+                }
+                return@forEach
+            }
+            if (
+                (request.includeUploadTemporary || !item.isUploadTemporary) &&
+                item.name.contains(request.query, ignoreCase = true)
+            ) {
+                matches += item
+                publishProgress()
+            }
+            if (item.isDirectory) directories.addLast(itemPath)
+        }
+    }
+
+    return RecursiveFileSearchResult(matches.toList(), incomplete)
+}
+
 sealed interface DirectoryPickerState {
     data object Idle : DirectoryPickerState
     data class Loading(val path: WebDavPath) : DirectoryPickerState
@@ -46,6 +210,8 @@ sealed interface DirectoryPickerState {
 
 sealed interface FilePreviewUiState {
     data object Idle : FilePreviewUiState
+    data object MultiSelected : FilePreviewUiState
+    data class Unsupported(val file: FileNode) : FilePreviewUiState
     data class Loading(val file: FileNode) : FilePreviewUiState
     data class Content(val file: FileNode, val preview: FilePreviewContent) : FilePreviewUiState
     data class Editing(
@@ -97,13 +263,22 @@ sealed interface FileMutationState {
 class FilesViewModel(
     private val repository: FileRepository,
     private val uploadSource: WindowsFileUploadSource,
+    private val themeRepository: DesktopThemeRepository,
 ) : ViewModel() {
+    val previewPaneOpen: StateFlow<Boolean> = themeRepository.previewPaneOpen
+
+    fun setPreviewPaneOpen(open: Boolean) {
+        viewModelScope.launch { themeRepository.setPreviewPaneOpen(open) }
+    }
+
     private val _state = MutableStateFlow<FilesUiState>(FilesUiState.Loading(WebDavPath.root()))
     val state: StateFlow<FilesUiState> = _state.asStateFlow()
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
     private val _multiSelectMode = MutableStateFlow(false)
     val multiSelectMode: StateFlow<Boolean> = _multiSelectMode.asStateFlow()
+    private val _selectedFiles = MutableStateFlow<Map<String, FileNode>>(emptyMap())
+    val selectedFiles: StateFlow<Map<String, FileNode>> = _selectedFiles.asStateFlow()
     private val _selectedPaths = MutableStateFlow<Set<String>>(emptySet())
     val selectedPaths: StateFlow<Set<String>> = _selectedPaths.asStateFlow()
     private val _mutationState = MutableStateFlow<FileMutationState>(FileMutationState.Idle)
@@ -112,16 +287,24 @@ class FilesViewModel(
     val directoryPickerState: StateFlow<DirectoryPickerState> = _directoryPickerState.asStateFlow()
     private val _previewState = MutableStateFlow<FilePreviewUiState>(FilePreviewUiState.Idle)
     val previewState: StateFlow<FilePreviewUiState> = _previewState.asStateFlow()
+    private val _previewPaneState = MutableStateFlow<FilePreviewUiState>(FilePreviewUiState.Idle)
+    val previewPaneState: StateFlow<FilePreviewUiState> = _previewPaneState.asStateFlow()
     private val messageChannel = Channel<String>(Channel.BUFFERED)
     val messages = messageChannel.receiveAsFlow()
     private var loadJob: Job? = null
     private var mutationJob: Job? = null
     private var directoryPickerJob: Job? = null
+    private val _searchState = MutableStateFlow<FileSearchUiState>(FileSearchUiState.Idle)
+    val searchState: StateFlow<FileSearchUiState> = _searchState.asStateFlow()
     private var previewJob: Job? = null
+    private var previewPaneJob: Job? = null
     private var loadVersion = 0L
     private var mutationVersion = 0L
     private var directoryPickerVersion = 0L
+    private var searchJob: Job? = null
+    private var searchVersion = 0L
     private var previewVersion = 0L
+    private var previewPaneVersion = 0L
 
     init {
         load(WebDavPath.root())
@@ -170,34 +353,167 @@ class FilesViewModel(
 
     fun refresh() = load(_state.value.path, isRefresh = true)
 
+    fun search(
+        query: String,
+        scope: FileSearchScope,
+        includeUploadTemporary: Boolean = true,
+    ) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty()) {
+            cancelSearch()
+            return
+        }
+        val basePath = when (scope) {
+            FileSearchScope.ROOT -> WebDavPath.root()
+            FileSearchScope.CURRENT_DIRECTORY -> _state.value.path
+            FileSearchScope.SELECTED -> return
+        }
+        runSearch(
+            FileSearchRequest(
+                query = normalizedQuery,
+                scope = scope,
+                basePath = basePath,
+                includeUploadTemporary = includeUploadTemporary,
+            ),
+        )
+    }
+
+    fun searchSelected(
+        query: String,
+        selectedFiles: List<FileNode>,
+        includeUploadTemporary: Boolean = true,
+    ) {
+        val normalizedQuery = query.trim()
+        if (normalizedQuery.isEmpty() || selectedFiles.isEmpty()) {
+            cancelSearch()
+            return
+        }
+        runSearch(
+            FileSearchRequest(
+                query = normalizedQuery,
+                scope = FileSearchScope.SELECTED,
+                basePath = _state.value.path,
+                selectedFiles = selectedFiles,
+                includeUploadTemporary = includeUploadTemporary,
+            ),
+        )
+    }
+
+    fun retrySearch() {
+        val request = _searchState.value.requestOrNull() ?: return
+        runSearch(request)
+    }
+
+    fun cancelSearch() {
+        searchVersion++
+        searchJob?.cancel()
+        _searchState.value = FileSearchUiState.Idle
+    }
+
+    private fun runSearch(request: FileSearchRequest) {
+        val version = ++searchVersion
+        searchJob?.cancel()
+        _searchState.value = FileSearchUiState.Loading(request, scannedDirectories = 0)
+        searchJob = viewModelScope.launch {
+            val result = try {
+                val searchResult = searchFilesRecursively(
+                    request = request,
+                    listDirectory = repository::list,
+                    onProgress = { progress ->
+                        if (version == searchVersion) {
+                            _searchState.value = FileSearchUiState.Loading(
+                                request = request,
+                                scannedDirectories = progress.scannedDirectories,
+                                files = progress.files,
+                                incomplete = progress.incomplete,
+                                progressVersion = progress.progressVersion,
+                                visibleFileCount = progress.visibleFileCount,
+                            )
+                        }
+                    },
+                )
+                if (searchResult.files.isEmpty()) {
+                    FileSearchUiState.Empty(request, searchResult.incomplete)
+                } else {
+                    FileSearchUiState.Success(
+                        request,
+                        searchResult.files,
+                        searchResult.incomplete,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                FileSearchUiState.Error(request, error.searchMessage())
+            }
+            if (version == searchVersion) _searchState.value = result
+        }
+    }
+
+
     fun enterMultiSelect() {
         _multiSelectMode.value = true
     }
 
     fun exitMultiSelect() {
         _multiSelectMode.value = false
-        _selectedPaths.value = emptySet()
+        updateSelection(emptyMap())
     }
 
     fun toggleSelection(path: String) {
-        _selectedPaths.value = _selectedPaths.value.toMutableSet().apply {
-            if (contains(path)) remove(path) else add(path)
-        }
+        val file = (_state.value as? FilesUiState.Success)?.files?.firstOrNull { it.path == path }
+            ?: (_searchState.value as? FileSearchUiState.Success)?.files?.firstOrNull {
+                it.path == path
+            }
+            ?: return
+        toggleSelection(file)
+    }
+
+    fun toggleSelection(file: FileNode) {
+        val selected = _selectedFiles.value.toMutableMap()
+        if (selected.remove(file.path) == null) selected[file.path] = file
+        updateSelection(selected)
     }
 
     fun selectAll() {
         val current = _state.value
         if (current is FilesUiState.Success) {
-            _selectedPaths.value = current.files.map { it.path }.toSet()
+            val selected = _selectedFiles.value.toMutableMap()
+            val allSelected = current.files.isNotEmpty() && current.files.all { selected.containsKey(it.path) }
+            if (allSelected) {
+                // 已全部选中，再次点击则取消全选
+                updateSelection(emptyMap())
+            } else {
+                current.files.forEach { selected[it.path] = it }
+                updateSelection(selected)
+            }
         }
     }
 
-    fun getSelectedFiles(): List<FileNode> {
+    fun invertSelection() {
         val current = _state.value
-        val selected = _selectedPaths.value
-        return if (current is FilesUiState.Success) {
-            current.files.filter { it.path in selected }
-        } else emptyList()
+        if (current is FilesUiState.Success) {
+            val selected = _selectedFiles.value.toMutableMap()
+            current.files.forEach { file ->
+                if (selected.remove(file.path) == null) selected[file.path] = file
+            }
+            updateSelection(selected)
+        }
+    }
+
+    fun selectOnly(file: FileNode) {
+        updateSelection(mapOf(file.path to file))
+    }
+
+    fun selectFiles(files: List<FileNode>) {
+        updateSelection(files.associate { it.path to it })
+    }
+
+    fun getSelectedFiles(): List<FileNode> = _selectedFiles.value.values.toList()
+
+    private fun updateSelection(selected: Map<String, FileNode>) {
+        _selectedFiles.value = selected
+        _selectedPaths.value = selected.keys
     }
 
     fun batchDelete(files: List<FileNode>) {
@@ -402,6 +718,40 @@ class FilesViewModel(
         previewVersion++
         previewJob?.cancel()
         _previewState.value = FilePreviewUiState.Idle
+    }
+
+    fun previewPane(file: FileNode) {
+        if (file.previewFormat() == null) {
+            _previewPaneState.value = FilePreviewUiState.Unsupported(file)
+            return
+        }
+        previewPaneJob?.cancel()
+        val version = ++previewPaneVersion
+        _previewPaneState.value = FilePreviewUiState.Loading(file)
+        previewPaneJob = viewModelScope.launch {
+            val nextState = try {
+                FilePreviewUiState.Content(file, repository.preview(file))
+            } catch (_: TimeoutCancellationException) {
+                FilePreviewUiState.Error(file, "预览加载超时，请重试")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                FilePreviewUiState.Error(file, error.previewMessage())
+            }
+            if (version == previewPaneVersion) _previewPaneState.value = nextState
+        }
+    }
+
+    fun clearPreviewPane() {
+        previewPaneVersion++
+        previewPaneJob?.cancel()
+        _previewPaneState.value = FilePreviewUiState.Idle
+    }
+
+    fun previewPaneMultiSelected() {
+        previewPaneVersion++
+        previewPaneJob?.cancel()
+        _previewPaneState.value = FilePreviewUiState.MultiSelected
     }
 
     fun prepareUpload(file: File) {
@@ -775,10 +1125,31 @@ class FilesViewModel(
         else -> "保存失败，请稍后重试"
     }
 
+
+    private fun Exception.searchMessage(): String = when (this) {
+        is WebDavException.AuthenticationRequired,
+        is WebDavException.CredentialUnavailable,
+        -> "WebDAV 凭据已失效，请重新登录"
+        is WebDavException.PermissionDenied -> "当前账户没有读取搜索目录的权限"
+        is WebDavException.NotFound -> "搜索目录不存在，文件列表可能已变化"
+        is WebDavException.Network -> "网络连接失败，请稍后重试"
+        is WebDavException.ResponseTooLarge -> "目录内容过多，无法完成搜索"
+        is WebDavException.InvalidResponse -> "云端返回的数据无法解析"
+        else -> message?.takeIf(String::isNotBlank) ?: "文件搜索失败"
+    }
+
     private companion object {
         const val MAX_RESOURCE_NAME_LENGTH = 255
         const val MAX_EDITED_TEXT_CHARACTERS = 100_000
         const val TEXT_SAVE_TIMEOUT_MILLIS = 60_000L
         const val PROGRESS_UPDATE_INTERVAL_MILLIS = 100L
     }
+}
+
+private fun FileSearchUiState.requestOrNull(): FileSearchRequest? = when (this) {
+    FileSearchUiState.Idle -> null
+    is FileSearchUiState.Loading -> request
+    is FileSearchUiState.Success -> request
+    is FileSearchUiState.Empty -> request
+    is FileSearchUiState.Error -> request
 }

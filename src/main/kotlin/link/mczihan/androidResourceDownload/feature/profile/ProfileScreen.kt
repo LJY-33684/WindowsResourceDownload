@@ -65,6 +65,9 @@ fun ProfileScreen(
             ?: user.email?.substringBefore('@')?.trim().takeUnless { it.isNullOrEmpty() }
             ?: user.name?.trim().takeUnless { it.isNullOrEmpty() }
             ?: "邮箱用户"
+        LoginType.QQ -> qqNickname?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: user.name?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: "QQ 用户"
     }
     val avatarUrl = user.profileAvatarUrl(allowQqLookup)
     var avatarBitmap by remember(avatarUrl) { mutableStateOf<ImageBitmap?>(null) }
@@ -147,6 +150,7 @@ fun ProfileScreen(
                     when (user.loginType) {
                         LoginType.GITHUB -> "GitHub"
                         LoginType.EMAIL -> "邮箱验证码"
+                        LoginType.QQ -> "QQ"
                     },
                 )
             }
@@ -167,8 +171,11 @@ fun ProfileScreen(
 private suspend fun loadAvatar(url: String): ImageBitmap? {
     return try {
         val client = OkHttpClient.Builder()
-            .followRedirects(false)
-            .followSslRedirects(false)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .proxySelector(java.net.ProxySelector.getDefault())
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build()
         val request = Request.Builder().url(url).build()
         client.newCall(request).execute().use { response ->
@@ -176,7 +183,8 @@ private suspend fun loadAvatar(url: String): ImageBitmap? {
             val bytes = response.body?.bytes() ?: return@use null
             Image.makeFromEncoded(bytes).asImageBitmap()
         }
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        link.mczihan.androidResourceDownload.core.platform.AppLogger.debug("Profile avatar 加载失败: ${error.message}")
         null
     }
 }

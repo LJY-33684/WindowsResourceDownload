@@ -12,6 +12,11 @@ interface AuthApi {
         @Body request: GitHubCompleteRequestDto,
     ): Response<BackendEnvelope<LoginResponseDto>>
 
+    @POST("/api/v1/auth/qq/login")
+    suspend fun loginWithQq(
+        @Body request: QqLoginRequestDto,
+    ): Response<BackendEnvelope<LoginResponseDto>>
+
     @POST("/api/v1/auth/email/code")
     suspend fun requestEmailCode(
         @Body request: EmailCodeRequestDto,

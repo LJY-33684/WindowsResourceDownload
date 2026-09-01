@@ -43,10 +43,12 @@ enum class Role {
 enum class LoginType {
     GITHUB,
     EMAIL,
+    QQ,
 }
 
 @Deprecated("Use LoginType")
 enum class LoginMethod {
     GITHUB,
     EMAIL,
+    QQ,
 }

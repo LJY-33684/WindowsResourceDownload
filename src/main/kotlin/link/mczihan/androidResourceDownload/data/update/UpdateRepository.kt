@@ -3,6 +3,9 @@ package link.mczihan.androidResourceDownload.data.update
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -10,17 +13,20 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 data class UpdateManifest(
     val latestVersion: String,
     val updateUrl: String,
+    val releaseNotes: String?,
 )
 
 class UpdateRepository(
     private val client: OkHttpClient,
 ) {
+    private val json = Json { ignoreUnknownKeys = true }
+
     suspend fun load(): UpdateManifest {
-        val request = Request.Builder()
-            .url(MANIFEST_URL)
-            .header("Cache-Control", "no-cache")
-            .build()
-        return withContext(Dispatchers.IO) {
+        val manifest = withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url(MANIFEST_URL)
+                .header("Cache-Control", "no-cache")
+                .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IOException("Update manifest request failed: ${response.code}")
                 val bytes = response.body?.bytes() ?: throw IOException("Update manifest is missing or too large")
@@ -28,6 +34,49 @@ class UpdateRepository(
                 parseUpdateManifest(bytes) ?: throw IOException("Update manifest is invalid")
             }
         }
+        // 从 GitHub API 拉取 release 内容（失败时不影响主流程）
+        val releaseNotes = fetchReleaseNotes(manifest.latestVersion)
+        return manifest.copy(releaseNotes = releaseNotes)
+    }
+
+    private suspend fun fetchReleaseNotes(version: String): String? = try {
+        withContext(Dispatchers.IO) {
+            val url = "https://api.github.com/repos/LJY-33684/WindowsResourceDownload/releases/tags/v$version"
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/vnd.github+json")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: return@withContext null
+                    val element = json.parseToJsonElement(body)
+                    element.jsonObject["body"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                } else {
+                    // 指定 tag 不存在（如最新版尚未发布对应 release）时，回退到最新 release 的内容
+                    fetchLatestReleaseNotes()
+                }
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private suspend fun fetchLatestReleaseNotes(): String? = try {
+        withContext(Dispatchers.IO) {
+            val url = "https://api.github.com/repos/LJY-33684/WindowsResourceDownload/releases/latest"
+            val request = Request.Builder()
+                .url(url)
+                .header("Accept", "application/vnd.github+json")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val body = response.body?.string() ?: return@use null
+                val element = json.parseToJsonElement(body)
+                element.jsonObject["body"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            }
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private companion object {
@@ -61,7 +110,7 @@ internal fun parseUpdateManifest(bytes: ByteArray): UpdateManifest? {
         }
         ?.toString()
         ?: return null
-    return UpdateManifest(latestVersion, updateUrl)
+    return UpdateManifest(latestVersion, updateUrl, releaseNotes = null)
 }
 
 internal fun compareAppVersions(left: String, right: String): Int? {

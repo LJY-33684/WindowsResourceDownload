@@ -1,4 +1,4 @@
-package link.mczihan.androidResourceDownload.core.theme
+﻿package link.mczihan.androidResourceDownload.core.theme
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
@@ -65,6 +65,25 @@ internal fun seedColorScheme(
             outline = colors.outline().resolve(scheme),
             outlineVariant = colors.outlineVariant().resolve(scheme),
             scrim = colors.scrim().resolve(scheme),
+            surfaceBright = colors.surfaceBright().resolve(scheme),
+            surfaceDim = colors.surfaceDim().resolve(scheme),
+            surfaceContainer = colors.surfaceContainer().resolve(scheme),
+            surfaceContainerHigh = colors.surfaceContainerHigh().resolve(scheme),
+            surfaceContainerHighest = colors.surfaceContainerHighest().resolve(scheme),
+            surfaceContainerLow = colors.surfaceContainerLow().resolve(scheme),
+            surfaceContainerLowest = colors.surfaceContainerLowest().resolve(scheme),
+            primaryFixed = colors.primaryFixed().resolve(scheme),
+            primaryFixedDim = colors.primaryFixedDim().resolve(scheme),
+            onPrimaryFixed = colors.onPrimaryFixed().resolve(scheme),
+            onPrimaryFixedVariant = colors.onPrimaryFixedVariant().resolve(scheme),
+            secondaryFixed = colors.secondaryFixed().resolve(scheme),
+            secondaryFixedDim = colors.secondaryFixedDim().resolve(scheme),
+            onSecondaryFixed = colors.onSecondaryFixed().resolve(scheme),
+            onSecondaryFixedVariant = colors.onSecondaryFixedVariant().resolve(scheme),
+            tertiaryFixed = colors.tertiaryFixed().resolve(scheme),
+            tertiaryFixedDim = colors.tertiaryFixedDim().resolve(scheme),
+            onTertiaryFixed = colors.onTertiaryFixed().resolve(scheme),
+            onTertiaryFixedVariant = colors.onTertiaryFixedVariant().resolve(scheme),
         )
     } else {
         lightColorScheme(
@@ -97,6 +116,25 @@ internal fun seedColorScheme(
             outline = colors.outline().resolve(scheme),
             outlineVariant = colors.outlineVariant().resolve(scheme),
             scrim = colors.scrim().resolve(scheme),
+            surfaceBright = colors.surfaceBright().resolve(scheme),
+            surfaceDim = colors.surfaceDim().resolve(scheme),
+            surfaceContainer = colors.surfaceContainer().resolve(scheme),
+            surfaceContainerHigh = colors.surfaceContainerHigh().resolve(scheme),
+            surfaceContainerHighest = colors.surfaceContainerHighest().resolve(scheme),
+            surfaceContainerLow = colors.surfaceContainerLow().resolve(scheme),
+            surfaceContainerLowest = colors.surfaceContainerLowest().resolve(scheme),
+            primaryFixed = colors.primaryFixed().resolve(scheme),
+            primaryFixedDim = colors.primaryFixedDim().resolve(scheme),
+            onPrimaryFixed = colors.onPrimaryFixed().resolve(scheme),
+            onPrimaryFixedVariant = colors.onPrimaryFixedVariant().resolve(scheme),
+            secondaryFixed = colors.secondaryFixed().resolve(scheme),
+            secondaryFixedDim = colors.secondaryFixedDim().resolve(scheme),
+            onSecondaryFixed = colors.onSecondaryFixed().resolve(scheme),
+            onSecondaryFixedVariant = colors.onSecondaryFixedVariant().resolve(scheme),
+            tertiaryFixed = colors.tertiaryFixed().resolve(scheme),
+            tertiaryFixedDim = colors.tertiaryFixedDim().resolve(scheme),
+            onTertiaryFixed = colors.onTertiaryFixed().resolve(scheme),
+            onTertiaryFixedVariant = colors.onTertiaryFixedVariant().resolve(scheme),
         )
     }
     return builder

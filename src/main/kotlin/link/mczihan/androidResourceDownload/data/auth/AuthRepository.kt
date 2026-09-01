@@ -25,6 +25,12 @@ interface AuthRepository {
         deviceId: String = "",
     ): AuthSession
 
+    suspend fun loginWithQq(
+        accessToken: String,
+        openId: String,
+        deviceId: String = "",
+    ): AuthSession
+
     suspend fun refreshSession(): AuthSession?
 
     suspend fun synchronizeUser(): AuthSession?

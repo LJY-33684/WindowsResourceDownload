@@ -1,11 +1,12 @@
-plugins {
-    kotlin("jvm") version "1.9.24"
-    kotlin("plugin.serialization") version "1.9.24"
-    id("org.jetbrains.compose") version "1.6.11"
+﻿plugins {
+    kotlin("jvm") version "2.1.20"
+    kotlin("plugin.serialization") version "2.1.20"
+    kotlin("plugin.compose") version "2.1.20"
+    id("org.jetbrains.compose") version "1.9.0"
 }
 
 group = "link.mczihan.androidResourceDownload"
-version = "2.3.2"
+version = "2.3.9"
 
 repositories {
     mavenCentral()
@@ -15,14 +16,13 @@ repositories {
 
 dependencies {
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
+    implementation("org.jetbrains.compose.material3:material3:1.9.0-alpha04")
     implementation(compose.materialIconsExtended)
 
     // Force skiko runtime to match skiko-awt version (fixes UnsatisfiedLinkError)
     implementation("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.8.9")
 
-    // Navigation
-    implementation("org.jetbrains.androidx.navigation:navigation-compose:2.8.0-alpha08")
+
 
     // Lifecycle (ViewModel)
     implementation("org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
@@ -50,6 +50,12 @@ dependencies {
 
     // Material Color Utilities (HCT color science for theme seed colors)
     implementation("com.materialkolor:material-color-utilities:1.5.0")
+    // JavaFX WebView for in-app GitHub OAuth login (captures deep-link navigation)
+    implementation("org.openjfx:javafx-base:21.0.11:win")
+    implementation("org.openjfx:javafx-graphics:21.0.11:win")
+    implementation("org.openjfx:javafx-controls:21.0.11:win")
+    implementation("org.openjfx:javafx-web:21.0.11:win")
+    implementation("org.openjfx:javafx-swing:21.0.11:win")
 }
 
 compose.desktop {
@@ -58,8 +64,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(org.jetbrains.compose.desktop.application.dsl.TargetFormat.Msi, org.jetbrains.compose.desktop.application.dsl.TargetFormat.Exe)
             packageName = "WindowsResourceDownload"
-            packageVersion = "2.3.1"
-            modules("jdk.httpserver")
+            packageVersion = "2.3.9"
+            modules("jdk.httpserver", "javafx.base", "javafx.graphics", "javafx.controls", "javafx.web", "javafx.swing")
             windows {
                 menu = true
                 shortcut = true

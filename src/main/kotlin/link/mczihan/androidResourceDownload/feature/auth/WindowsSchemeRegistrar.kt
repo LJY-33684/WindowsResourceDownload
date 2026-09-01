@@ -1,9 +1,9 @@
-package link.mczihan.androidResourceDownload.feature.auth
+﻿package link.mczihan.androidResourceDownload.feature.auth
 
 import java.io.File
 
 object WindowsSchemeRegistrar {
-    private const val SCHEME = "link.mczihan.androidresourcedownload"
+    private const val SCHEME = "WindowsResourceDownload"
     private const val CALLBACK_FILE_NAME = "ard_oauth_callback.txt"
 
     private fun debugLog(message: String) {
@@ -32,12 +32,24 @@ object WindowsSchemeRegistrar {
     private fun registerViaRegFile(command: String) {
         val regPath = "HKEY_CURRENT_USER\\Software\\Classes\\$SCHEME"
         val escapedCommand = command.replace("\\", "\\\\").replace("\"", "\\\"")
+        val exePath = command.substringAfter('"').substringBefore('"')
+        val escapedExe = exePath.replace("\\", "\\\\").replace("\"", "\\\"")
         val content = """
             |Windows Registry Editor Version 5.00
             |
             |[$regPath]
             |@="URL:AndroidResourceDownload"
             |"URL Protocol"=""
+            |"NoOpenWith"=""
+            |"NoStaticDefaultVerb"=""
+            |"NoDriveTypeAutoRun"=dword:000000ff
+            |"FriendlyTypeName"="AndroidResourceDownload"
+            |
+            |[$regPath\DefaultIcon]
+            |@="$escapedExe",0
+            |
+            |[$regPath\shell]
+            |@="open"
             |
             |[$regPath\shell\open]
             |@="Open with AndroidResourceDownload"

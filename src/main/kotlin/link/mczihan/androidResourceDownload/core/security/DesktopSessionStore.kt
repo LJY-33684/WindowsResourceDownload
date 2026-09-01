@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import link.mczihan.androidResourceDownload.core.platform.AppLogger
 import link.mczihan.androidResourceDownload.domain.model.AuthSession
 import link.mczihan.androidResourceDownload.domain.model.LoginType
 import link.mczihan.androidResourceDownload.domain.model.Role
@@ -25,11 +26,17 @@ class DesktopSessionStore(
     }
 
     override suspend fun read(): AuthSession? = withContext(Dispatchers.IO) {
-        if (!sessionFile.exists()) return@withContext null
+        if (!sessionFile.exists()) {
+            AppLogger.debug("SessionStore: ${sessionFile.absolutePath} 不存在")
+            return@withContext null
+        }
         try {
             val encoded = sessionFile.readText(Charsets.UTF_8)
-            json.decodeFromString(PersistedSession.serializer(), encoded).toDomain()
-        } catch (_: Exception) {
+            val session = json.decodeFromString(PersistedSession.serializer(), encoded).toDomain()
+            AppLogger.debug("SessionStore: session 已读取 (${encoded.length} 字节), 过期时间=${session.expiresAtEpochMillis}")
+            session
+        } catch (error: Exception) {
+            AppLogger.error("SessionStore: session 读取/解码失败，已清除", error)
             clearBestEffort()
             null
         }
@@ -38,15 +45,21 @@ class DesktopSessionStore(
     override suspend fun write(session: AuthSession) = withContext(Dispatchers.IO) {
         val encoded = json.encodeToString(PersistedSession.serializer(), PersistedSession.fromDomain(session))
         try {
+            sessionFile.parentFile?.mkdirs()
             sessionFile.writeText(encoded, Charsets.UTF_8)
+            AppLogger.debug("SessionStore: session 已写入 ${sessionFile.absolutePath} (${encoded.length} 字节)")
         } catch (error: Exception) {
+            AppLogger.error("SessionStore: session 写入失败 ${sessionFile.absolutePath}", error)
             throw SessionStorageException("Unable to persist session", error)
         }
     }
 
     override suspend fun clear() = withContext(Dispatchers.IO) {
         try {
-            if (sessionFile.exists()) sessionFile.delete()
+            if (sessionFile.exists()) {
+                sessionFile.delete()
+                AppLogger.debug("SessionStore: session 已清除 ${sessionFile.absolutePath}")
+            }
         } catch (error: Exception) {
             throw SessionStorageException("Unable to clear session", error)
         }
