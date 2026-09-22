@@ -129,6 +129,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import link.mczihan.androidResourceDownload.core.common.RolePreview
 import link.mczihan.androidResourceDownload.core.platform.AppLogger
+import link.mczihan.androidResourceDownload.core.platform.NativeFileDialog
 import link.mczihan.androidResourceDownload.core.common.formatDate
 import link.mczihan.androidResourceDownload.core.common.formatFileSize
 import link.mczihan.androidResourceDownload.core.platform.DesktopDragDrop
@@ -148,8 +149,6 @@ import link.mczihan.androidResourceDownload.domain.webdav.WebDavPath
 import java.io.ByteArrayInputStream
 import java.io.File
 import javax.imageio.ImageIO
-import javax.swing.ImageIcon
-import javax.swing.JFileChooser
 
 
 
@@ -813,45 +812,21 @@ private enum class TransferType { MOVE, COPY }
 private data class TransferRequest(val file: FileNode, val type: TransferType)
 private data class BatchTransferRequest(val files: List<FileNode>, val type: TransferType)
 
-private fun loadAppIconImage(): java.awt.Image? = try {
-    val url = object {}.javaClass.getResource("/app_icon.png")
-    if (url != null) ImageIcon(url).image else null
-} catch (_: Exception) {
-    null
-}
-
-private fun createIconFileChooser(): JFileChooser = object : JFileChooser() {
-    override fun createDialog(parent: java.awt.Component?): javax.swing.JDialog {
-        val dialog = super.createDialog(parent)
-        loadAppIconImage()?.let { dialog.setIconImage(it) }
-        return dialog
-    }
-}
-
 private fun pickFilesForUpload(
     onFiles: (List<File>) -> Unit,
 ) {
-    val chooser = createIconFileChooser()
-    chooser.dialogTitle = "选择要上传的文件"
-    chooser.isMultiSelectionEnabled = true
-    chooser.fileSelectionMode = JFileChooser.FILES_ONLY
-    val result = chooser.showOpenDialog(null)
-    if (result == JFileChooser.APPROVE_OPTION) {
-        val files = chooser.selectedFiles.filter { it.exists() && it.isFile }
-        if (files.isNotEmpty()) onFiles(files)
-    }
+    val paths = NativeFileDialog.pickFiles("选择要上传的文件", allowMultiple = true)
+    val files = paths.map { File(it) }.filter { it.exists() && it.isFile }
+    if (files.isNotEmpty()) onFiles(files)
 }
 
 private fun pickDirectoryForUpload(
     onDirectory: (File) -> Unit,
 ) {
-    val chooser = createIconFileChooser()
-    chooser.dialogTitle = "选择要上传的文件夹"
-    chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
-    val result = chooser.showOpenDialog(null)
-    if (result == JFileChooser.APPROVE_OPTION) {
-        val dir = chooser.selectedFile
-        if (dir != null && dir.exists() && dir.isDirectory) onDirectory(dir)
+    val path = NativeFileDialog.pickFolder("选择要上传的文件夹")
+    if (path != null) {
+        val dir = File(path)
+        if (dir.exists() && dir.isDirectory) onDirectory(dir)
     }
 }
 

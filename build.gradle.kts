@@ -47,6 +47,7 @@ dependencies {
 
     // JNA for Windows API (title bar dark mode)
     implementation("net.java.dev.jna:jna:5.14.0")
+    implementation("net.java.dev.jna:jna-platform:5.14.0")
 
     // Material Color Utilities (HCT color science for theme seed colors)
     implementation("com.materialkolor:material-color-utilities:1.5.0")
