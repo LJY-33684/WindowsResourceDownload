@@ -1,5 +1,7 @@
 package link.mczihan.androidResourceDownload.domain.model
 
+import kotlinx.serialization.Serializable
+
 data class DownloadTask(
     val id: String,
     val ownerId: String = "",
@@ -24,6 +26,7 @@ data class DownloadTask(
  * PENDING waits to start, RUNNING transfers bytes, and PAUSED can resume.
  * SUCCESS is complete, while FAILED and CANCELLED are terminal until retried.
  */
+@Serializable
 enum class DownloadStatus {
     PENDING,
     RUNNING,

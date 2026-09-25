@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -80,7 +81,7 @@ import link.mczihan.androidResourceDownload.domain.model.DownloadTask
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
-    tasks: List<DownloadTask>,
+    tasks: List<DownloadTaskUi>,
     currentSpeeds: Map<String, Long> = emptyMap(),
     onStatusChange: (taskId: String, status: DownloadStatus) -> Unit,
     onOpen: (DownloadTask) -> Unit,
@@ -104,40 +105,40 @@ fun DownloadsScreen(
 
     val filteredTasks = filterDownloadTasks(tasks, if (searchActive) searchQuery else "")
     val selectedTaskIdSet = selectedTaskIds.toSet()
-    val selectedTasks = tasks.filter { it.id in selectedTaskIdSet }
+    val selectedTasks = tasks.filter { it.task.id in selectedTaskIdSet }
     val allVisibleTasksSelected = filteredTasks.isNotEmpty() &&
-        filteredTasks.all { it.id in selectedTaskIdSet }
-    val resumableTasks = selectedTasks.filter { task ->
-        task.status in setOf(
+        filteredTasks.all { it.task.id in selectedTaskIdSet }
+    val resumableTasks = selectedTasks.filter { item ->
+        item.task.status in setOf(
             DownloadStatus.PAUSED,
             DownloadStatus.FAILED,
             DownloadStatus.CANCELLED,
         )
     }
-    val pausableTasks = selectedTasks.filter { it.status == DownloadStatus.RUNNING }
-    val cancellableSelectedTasks = selectedTasks.filter { task ->
-        task.status in setOf(
+    val pausableTasks = selectedTasks.filter { it.task.status == DownloadStatus.RUNNING }
+    val cancellableSelectedTasks = selectedTasks.filter { item ->
+        item.task.status in setOf(
             DownloadStatus.PENDING,
             DownloadStatus.RUNNING,
             DownloadStatus.PAUSED,
         )
     }
-    val deletableSelectedTasks = selectedTasks.filter { task ->
-        task.status in setOf(
+    val deletableSelectedTasks = selectedTasks.filter { item ->
+        item.task.status in setOf(
             DownloadStatus.SUCCESS,
             DownloadStatus.FAILED,
             DownloadStatus.CANCELLED,
         )
     }
-    val hasCancellableTasks = tasks.any { task ->
-        task.status in setOf(
+    val hasCancellableTasks = tasks.any { item ->
+        item.task.status in setOf(
             DownloadStatus.PENDING,
             DownloadStatus.RUNNING,
             DownloadStatus.PAUSED,
         )
     }
-    val hasClearableTasks = tasks.any { task ->
-        task.status in setOf(
+    val hasClearableTasks = tasks.any { item ->
+        item.task.status in setOf(
             DownloadStatus.SUCCESS,
             DownloadStatus.FAILED,
             DownloadStatus.CANCELLED,
@@ -156,7 +157,7 @@ fun DownloadsScreen(
     }
 
     fun toggleAllVisibleTasks() {
-        val visibleIds = filteredTasks.map(DownloadTask::id)
+        val visibleIds = filteredTasks.map { it.task.id }
         selectedTaskIds = if (visibleIds.isNotEmpty() && visibleIds.all(selectedTaskIdSet::contains)) {
             selectedTaskIds.filterNot(visibleIds::contains)
         } else {
@@ -227,7 +228,7 @@ fun DownloadsScreen(
                         label = "继续",
                         enabled = resumableTasks.isNotEmpty(),
                         onClick = {
-                            resumableTasks.forEach { onStatusChange(it.id, DownloadStatus.RUNNING) }
+                            resumableTasks.forEach { onStatusChange(it.task.id, DownloadStatus.RUNNING) }
                             exitMultiSelect()
                         },
                     )
@@ -236,7 +237,7 @@ fun DownloadsScreen(
                         label = "暂停",
                         enabled = pausableTasks.isNotEmpty(),
                         onClick = {
-                            pausableTasks.forEach { onStatusChange(it.id, DownloadStatus.PAUSED) }
+                            pausableTasks.forEach { onStatusChange(it.task.id, DownloadStatus.PAUSED) }
                             exitMultiSelect()
                         },
                     )
@@ -247,7 +248,7 @@ fun DownloadsScreen(
                         destructive = true,
                         onClick = {
                             cancellableSelectedTasks.forEach {
-                                onStatusChange(it.id, DownloadStatus.CANCELLED)
+                                onStatusChange(it.task.id, DownloadStatus.CANCELLED)
                             }
                             exitMultiSelect()
                         },
@@ -259,7 +260,7 @@ fun DownloadsScreen(
                         destructive = true,
                         onClick = {
                             deleteLocalFile = true
-                            deleteTaskIds = deletableSelectedTasks.map(DownloadTask::id)
+                            deleteTaskIds = deletableSelectedTasks.map { it.task.id }
                         },
                     )
                 }
@@ -316,22 +317,23 @@ fun DownloadsScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp),
                 ) {
-                    items(filteredTasks, key = DownloadTask::id) { task ->
+                    items(filteredTasks, key = { it.task.id }) { item ->
                         DownloadTaskItem(
-                            task = task,
-                            currentSpeed = currentSpeeds[task.id] ?: 0L,
-                            onStatusChange = { status -> onStatusChange(task.id, status) },
-                            onOpen = { onOpen(task) },
+                            task = item.task,
+                            fileMissing = item.fileMissing,
+                            currentSpeed = currentSpeeds[item.task.id] ?: 0L,
+                            onStatusChange = { status -> onStatusChange(item.task.id, status) },
+                            onOpen = { onOpen(item.task) },
                             onDelete = {
-                                deleteTaskId = task.id
+                                deleteTaskId = item.task.id
                                 deleteLocalFile = true
                             },
                             selectionMode = multiSelectMode,
-                            selected = task.id in selectedTaskIdSet,
-                            onSelectionToggle = { toggleTaskSelection(task.id) },
+                            selected = item.task.id in selectedTaskIdSet,
+                            onSelectionToggle = { toggleTaskSelection(item.task.id) },
                             onLongSelect = {
                                 multiSelectMode = true
-                                toggleTaskSelection(task.id)
+                                toggleTaskSelection(item.task.id)
                             },
                             modifier = Modifier
                                 .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -480,6 +482,7 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadTaskItem(
     task: DownloadTask,
+    fileMissing: Boolean = false,
     currentSpeed: Long,
     onStatusChange: (DownloadStatus) -> Unit,
     onOpen: () -> Unit,
@@ -582,9 +585,20 @@ private fun DownloadTaskItem(
                 visible = task.status == DownloadStatus.RUNNING,
             ) {
                 if (totalBytes != null && totalBytes > 0L) {
+                    val stopColor = MaterialTheme.colorScheme.primary
                     LinearProgressIndicator(
                         progress = { animatedProgress },
                         modifier = Modifier.fillMaxWidth(),
+                        drawStopIndicator = {
+                            val p = animatedProgress.coerceIn(0f, 1f)
+                            val r = size.height / 2f
+                            val x = (size.width * p).coerceIn(r, size.width - r)
+                            drawCircle(
+                                color = stopColor,
+                                radius = r,
+                                center = Offset(x, size.height / 2f),
+                            )
+                        },
                     )
                 } else {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -595,7 +609,7 @@ private fun DownloadTaskItem(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                StatusBadge(task.status)
+                StatusBadge(task.status, fileMissing)
             }
             Box(
                 modifier = Modifier.align(Alignment.End),
@@ -613,16 +627,28 @@ private fun DownloadTaskItem(
 }
 
 @Composable
-private fun StatusBadge(status: DownloadStatus) {
+private fun StatusBadge(status: DownloadStatus, fileMissing: Boolean = false) {
     Surface(
         shape = CircleShape,
-        color = statusContainerColor(status),
+        color = if (fileMissing && status == DownloadStatus.SUCCESS) {
+            MaterialTheme.colorScheme.errorContainer
+        } else {
+            statusContainerColor(status)
+        },
     ) {
         Text(
-            text = statusLabel(status),
+            text = if (fileMissing && status == DownloadStatus.SUCCESS) {
+                "文件已删除"
+            } else {
+                statusLabel(status)
+            },
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelMedium,
-            color = statusColor(status),
+            color = if (fileMissing && status == DownloadStatus.SUCCESS) {
+                MaterialTheme.colorScheme.onErrorContainer
+            } else {
+                statusColor(status)
+            },
         )
     }
 }
@@ -755,16 +781,16 @@ private fun taskProgressText(
 }
 
 internal fun filterDownloadTasks(
-    tasks: List<DownloadTask>,
+    tasks: List<DownloadTaskUi>,
     query: String,
-): List<DownloadTask> {
+): List<DownloadTaskUi> {
     val normalizedQuery = query.trim()
     if (normalizedQuery.isEmpty()) return tasks
-    return tasks.filter { task ->
-        task.fileName.contains(normalizedQuery, ignoreCase = true) ||
-            task.remotePath.contains(normalizedQuery, ignoreCase = true) ||
-            task.relativePath.contains(normalizedQuery, ignoreCase = true) ||
-            statusLabel(task.status).contains(normalizedQuery, ignoreCase = true)
+    return tasks.filter { item ->
+        item.task.fileName.contains(normalizedQuery, ignoreCase = true) ||
+            item.task.remotePath.contains(normalizedQuery, ignoreCase = true) ||
+            item.task.relativePath.contains(normalizedQuery, ignoreCase = true) ||
+            statusLabel(item.task.status).contains(normalizedQuery, ignoreCase = true)
     }
 }
 

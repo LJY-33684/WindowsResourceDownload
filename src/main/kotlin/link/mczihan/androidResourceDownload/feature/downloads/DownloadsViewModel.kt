@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -12,30 +13,63 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import link.mczihan.androidResourceDownload.data.download.DesktopDownloadFileOpener
+import link.mczihan.androidResourceDownload.data.download.DesktopPublicDownloadStore
 import link.mczihan.androidResourceDownload.data.download.DownloadRepository
 import link.mczihan.androidResourceDownload.data.download.EnqueueResult
+import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
 import link.mczihan.androidResourceDownload.domain.model.DownloadTask
 import link.mczihan.androidResourceDownload.domain.model.FileNode
 import link.mczihan.androidResourceDownload.service.DesktopDownloadQueueController
+
+/** Download task enriched with desktop-specific UI state. */
+data class DownloadTaskUi(
+    val task: DownloadTask,
+    val fileMissing: Boolean,
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DownloadsViewModel(
     private val repository: DownloadRepository,
     private val queueController: DesktopDownloadQueueController,
     private val fileOpener: DesktopDownloadFileOpener,
+    private val publicDownloadStore: DesktopPublicDownloadStore,
 ) : ViewModel() {
     private val ownerId = MutableStateFlow<String?>(null)
     private val messageChannel = Channel<String>(Channel.BUFFERED)
 
+    // Periodically re-emits so file-missing state refreshes without waiting for a task mutation.
+    private val fileCheckTicker = flow {
+        emit(Unit)
+        while (true) {
+            delay(FILE_CHECK_INTERVAL_MILLIS)
+            emit(Unit)
+        }
+    }
+
     val tasks = ownerId
         .filterNotNull()
         .flatMapLatest(repository::observe)
+        .combine(fileCheckTicker) { list, _ -> list }
+        .map { list ->
+            list.map { task ->
+                DownloadTaskUi(
+                    task = task,
+                    fileMissing = task.status == DownloadStatus.SUCCESS &&
+                        publicDownloadStore.fileFor(task.publicUri) == null,
+                )
+            }
+        }
+        .flowOn(Dispatchers.IO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
     private val speedEstimator = DownloadSpeedEstimator()
     private val _currentSpeeds = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -49,7 +83,7 @@ class DownloadsViewModel(
             while (isActive) {
                 delay(SPEED_REFRESH_INTERVAL_MILLIS)
                 _currentSpeeds.value = speedEstimator.update(
-                    tasks.value,
+                    tasks.value.map { it.task },
                     System.currentTimeMillis(),
                 )
             }
@@ -152,5 +186,6 @@ class DownloadsViewModel(
 
     private companion object {
         const val SPEED_REFRESH_INTERVAL_MILLIS = 1_000L
+        const val FILE_CHECK_INTERVAL_MILLIS = 1_000L
     }
 }

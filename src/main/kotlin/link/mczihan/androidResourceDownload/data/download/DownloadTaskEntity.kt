@@ -1,8 +1,10 @@
 package link.mczihan.androidResourceDownload.data.download
 
+import kotlinx.serialization.Serializable
 import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
 import link.mczihan.androidResourceDownload.domain.model.DownloadTask
 
+@Serializable
 data class DownloadTaskEntity(
     val id: String,
     val ownerId: String,

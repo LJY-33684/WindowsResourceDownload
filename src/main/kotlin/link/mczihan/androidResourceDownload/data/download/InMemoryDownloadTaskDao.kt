@@ -1,16 +1,48 @@
 package link.mczihan.androidResourceDownload.data.download
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import link.mczihan.androidResourceDownload.domain.model.DownloadStatus
 
 /**
  * In-memory replacement for Room DownloadTaskDao.
  * Stores tasks in a MutableStateFlow list.
+ * When a [DownloadTaskStore] and [scope] are provided, every task mutation is
+ * persisted (debounced) to disk so history survives app restarts.
  */
-class InMemoryDownloadTaskDao {
+class InMemoryDownloadTaskDao(
+    private val store: DownloadTaskStore? = null,
+    scope: CoroutineScope? = null,
+) {
     private val tasks = MutableStateFlow<List<DownloadTaskEntity>>(emptyList())
+    private var saveJob: Job? = null
+
+    init {
+        if (store != null) {
+            tasks.value = store.load()
+        }
+        if (store != null && scope != null) {
+            scope.launch {
+                tasks.collect { snapshot ->
+                    saveJob?.cancel()
+                    saveJob = scope.launch {
+                        delay(SAVE_DEBOUNCE_MILLIS)
+                        withContext(Dispatchers.IO) {
+                            store.save(snapshot)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fun observeForOwner(ownerId: String): Flow<List<DownloadTaskEntity>> =
         tasks.map { list ->
@@ -283,4 +315,8 @@ class InMemoryDownloadTaskDao {
             it.ownerId == ownerId &&
                 it.status in setOf(DownloadStatus.SUCCESS, DownloadStatus.FAILED, DownloadStatus.CANCELLED)
         }
+
+    private companion object {
+        const val SAVE_DEBOUNCE_MILLIS = 500L
+    }
 }

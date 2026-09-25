@@ -10,6 +10,7 @@ import link.mczihan.androidResourceDownload.data.download.DesktopDownloadFileOpe
 import link.mczihan.androidResourceDownload.data.download.DesktopPublicDownloadStore
 import link.mczihan.androidResourceDownload.data.download.DownloadFileStore
 import link.mczihan.androidResourceDownload.data.download.DownloadRepository
+import link.mczihan.androidResourceDownload.data.download.DownloadTaskStore
 import link.mczihan.androidResourceDownload.data.download.InMemoryDownloadTaskDao
 import link.mczihan.androidResourceDownload.data.file.WebDavFileRepository
 import link.mczihan.androidResourceDownload.data.file.WindowsFileUploadSource
@@ -42,6 +43,9 @@ import retrofit2.Retrofit
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import okhttp3.MediaType.Companion.toMediaType
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Manual dependency injection container for the desktop app.
@@ -95,7 +99,11 @@ class AppContainer {
     val uploadSource = WindowsFileUploadSource()
 
     // ─── Download ──────────────────────────────────────────────
-    private val downloadDao = InMemoryDownloadTaskDao()
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val downloadDao = InMemoryDownloadTaskDao(
+        store = DownloadTaskStore(File(System.getProperty("user.dir"))),
+        scope = appScope,
+    )
     private val downloadFileStore = DownloadFileStore(File(System.getProperty("java.io.tmpdir"), "ard-downloads"))
     val publicDownloadStore = DesktopPublicDownloadStore()
     val downloadRepository = DownloadRepository(downloadDao, downloadFileStore, publicDownloadStore)
@@ -138,6 +146,7 @@ class AppContainer {
         repository = downloadRepository,
         queueController = downloadQueueController,
         fileOpener = downloadFileOpener,
+        publicDownloadStore = publicDownloadStore,
     )
     val uploadsViewModel = UploadsViewModel(
         repository = fileRepository,
