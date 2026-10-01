@@ -258,6 +258,11 @@ sealed interface FileMutationState {
     ) : FileMutationState
     data class AwaitingOverwrite(val operation: FileOperation) : FileMutationState
     data class Failed(val operation: FileOperation?, val message: String) : FileMutationState
+    data class BatchTransfer(
+        val action: String,
+        val total: Int,
+        val completed: Int,
+    ) : FileMutationState
 }
 
 class FilesViewModel(
@@ -550,43 +555,79 @@ class FilesViewModel(
 
     private fun batchTransfer(files: List<FileNode>, destinationDirectory: WebDavPath, move: Boolean) {
         viewModelScope.launch {
-            var successCount = 0
             val action = if (move) "移动" else "复制"
-            files.forEach { file ->
-                val source = WebDavPath.parseDecoded(file.path)
-                val destination = runCatching {
-                    destinationDirectory.child(requireNotNull(source.name))
-                }.getOrNull() ?: return@forEach
-                try {
-                    if (move) {
-                        repository.move(
-                            source = source,
-                            destination = destination,
-                            overwrite = false,
-                            sourceIsCollection = file.isDirectory,
-                            sourceEtag = file.etag,
-                        )
+            _mutationState.value = FileMutationState.BatchTransfer(action, files.size, 0)
+            try {
+                var successCount = 0
+                files.forEachIndexed { index, file ->
+                    val source = WebDavPath.parseDecoded(file.path)
+                    val baseName = requireNotNull(source.name)
+                    val destination = if (move) {
+                        runCatching { destinationDirectory.child(baseName) }.getOrNull() ?: return@forEachIndexed
                     } else {
-                        repository.copy(
-                            source = source,
-                            destination = destination,
-                            overwrite = false,
-                            sourceIsCollection = file.isDirectory,
-                            sourceEtag = file.etag,
-                        )
+                        resolveUniqueDestination(destinationDirectory, baseName) ?: return@forEachIndexed
                     }
-                    successCount++
-                    AppLogger.info("$action 成功: ${file.name} -> $destinationDirectory")
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    AppLogger.error("$action 失败: ${file.name}", error)
+                    try {
+                        if (move) {
+                            repository.move(
+                                source = source,
+                                destination = destination,
+                                overwrite = false,
+                                sourceIsCollection = file.isDirectory,
+                                sourceEtag = file.etag,
+                            )
+                        } else {
+                            repository.copy(
+                                source = source,
+                                destination = destination,
+                                overwrite = false,
+                                sourceIsCollection = file.isDirectory,
+                                sourceEtag = file.etag,
+                            )
+                        }
+                        successCount++
+                        val finalName = destination.name ?: baseName
+                        AppLogger.info(
+                            "$action 成功: " +
+                                if (finalName != baseName) "$baseName -> $finalName" else baseName +
+                                " (到 $destinationDirectory)",
+                        )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        AppLogger.error("$action 失败: ${file.name}", error)
+                    }
+                    _mutationState.value = FileMutationState.BatchTransfer(action, files.size, index + 1)
                 }
+                exitMultiSelect()
+                load(_state.value.path)
+                messageChannel.send("已$action $successCount/${files.size} 项")
+            } finally {
+                _mutationState.value = FileMutationState.Idle
             }
-            exitMultiSelect()
-            load(_state.value.path)
-            messageChannel.send("已$action $successCount/${files.size} 项")
         }
+    }
+
+    private fun appendSuffixToFileName(fileName: String, suffix: String): String {
+        val dotIndex = fileName.lastIndexOf('.')
+        return if (dotIndex > 0) {
+            fileName.substring(0, dotIndex) + suffix + fileName.substring(dotIndex)
+        } else {
+            fileName + suffix
+        }
+    }
+
+    private suspend fun resolveUniqueDestination(directory: WebDavPath, name: String): WebDavPath? {
+        val original = runCatching { directory.child(name) }.getOrNull() ?: return null
+        if (!repository.resourceExists(original)) return original
+        var counter = 1
+        while (counter < 1000) {
+            val candidateName = appendSuffixToFileName(name, "($counter)")
+            val candidate = runCatching { directory.child(candidateName) }.getOrNull()
+            if (candidate != null && !repository.resourceExists(candidate)) return candidate
+            counter++
+        }
+        return original
     }
 
     private val folderDownloadCount = mutableMapOf<String, Int>()
@@ -920,17 +961,32 @@ class FilesViewModel(
         move: Boolean,
     ) {
         if (_mutationState.value != FileMutationState.Idle) return
-        val destination = runCatching { destinationDirectory.child(requireNotNull(source.name)) }
-            .getOrElse {
-                _mutationState.value = FileMutationState.Failed(null, "目标文件夹无效")
-                return
+        viewModelScope.launch {
+            val baseName = source.name
+            if (baseName == null) {
+                _mutationState.value = FileMutationState.Failed(null, "WebDAV 根目录不能复制")
+                return@launch
             }
-        val operation = if (move) {
-            FileOperation.Move(source, destination, sourceIsDirectory, sourceEtag)
-        } else {
-            FileOperation.Copy(source, destination, sourceIsDirectory, sourceEtag)
+            val destination = if (move) {
+                runCatching { destinationDirectory.child(baseName) }
+                    .getOrElse {
+                        _mutationState.value = FileMutationState.Failed(null, "目标文件夹无效")
+                        return@launch
+                    }
+            } else {
+                resolveUniqueDestination(destinationDirectory, baseName)
+                    ?: run {
+                        _mutationState.value = FileMutationState.Failed(null, "目标文件夹无效")
+                        return@launch
+                    }
+            }
+            val operation = if (move) {
+                FileOperation.Move(source, destination, sourceIsDirectory, sourceEtag)
+            } else {
+                FileOperation.Copy(source, destination, sourceIsDirectory, sourceEtag)
+            }
+            runOperation(operation, overwrite = false)
         }
-        runOperation(operation, overwrite = false)
     }
 
     private fun runOperation(operation: FileOperation, overwrite: Boolean) {

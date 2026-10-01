@@ -774,6 +774,7 @@ fun FilesScreen(
             onDismiss = { viewModel.dismissMutation() },
             onConfirm = { viewModel.confirmOverwrite() },
         )
+        is FileMutationState.BatchTransfer -> BatchTransferDialog(state = mutation)
         is FileMutationState.Failed -> MutationFailedDialog(
             state = mutation,
             onDismiss = { viewModel.dismissMutation() },
@@ -1468,6 +1469,32 @@ private fun MutationRunningDialog(
             }
         },
         confirmButton = { if (onCancel != null) TextButton(onClick = onCancel) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun BatchTransferDialog(state: FileMutationState.BatchTransfer) {
+    val actionLabel = when (state.action) {
+        "移动" -> "移动"
+        else -> "复制"
+    }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("正在${actionLabel}任务") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (state.total > 0) "正在${actionLabel} ${state.completed}/${state.total} 项…" else "正在${actionLabel}…")
+                if (state.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { (state.completed.toFloat() / state.total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {},
     )
 }
 

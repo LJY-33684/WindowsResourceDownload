@@ -54,6 +54,9 @@ class CredentialBackedWebDavClient(
     override suspend fun propFind(path: WebDavPath, depth: WebDavDepth): List<WebDavResource> =
         execute { it.propFind(path, depth) }
 
+    override suspend fun propFindResource(path: WebDavPath): WebDavResource? =
+        execute { it.propFindResource(path) }
+
     override suspend fun head(path: WebDavPath): WebDavMetadata = execute { it.head(path) }
 
     override suspend fun get(
@@ -92,6 +95,13 @@ class CredentialBackedWebDavClient(
         sourceIsCollection: Boolean,
         sourceEtag: String?,
     ) = execute { it.copy(source, destination, overwrite, sourceIsCollection, sourceEtag) }
+
+    override suspend fun copyFileContents(
+        source: WebDavPath,
+        destination: WebDavPath,
+        overwrite: Boolean,
+        sourceEtag: String?,
+    ) = execute { it.copyFileContents(source, destination, overwrite, sourceEtag) }
 
     private class FixedCredentialProvider(
         private val lease: CredentialLease,

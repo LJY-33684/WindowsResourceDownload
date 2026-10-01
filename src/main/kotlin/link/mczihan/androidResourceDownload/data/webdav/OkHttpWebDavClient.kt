@@ -25,6 +25,7 @@ import link.mczihan.androidResourceDownload.domain.webdav.WebDavReadResponse
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavResource
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavStatusMapper
 import link.mczihan.androidResourceDownload.domain.webdav.WebDavUpload
+import link.mczihan.androidResourceDownload.domain.webdav.strongEntityTagOrNull
 import okhttp3.Authenticator
 import okhttp3.Call
 import okhttp3.Callback
@@ -58,8 +59,27 @@ class OkHttpWebDavClient(
     override suspend fun propFind(
         path: WebDavPath,
         depth: WebDavDepth,
+    ): List<WebDavResource> = propFindAt(endpoint.collectionUrlFor(path), depth)
+
+    override suspend fun propFindResource(path: WebDavPath): WebDavResource? {
+        try {
+            return propFindAt(endpoint.urlFor(path), WebDavDepth.ZERO).resourceAt(path)
+        } catch (_: WebDavException.NotFound) {
+            // Some servers distinguish a collection URI only by its trailing slash.
+        } catch (_: WebDavException.RedirectRejected) {
+            // Retry the canonical collection URI without following a write-adjacent redirect.
+        }
+        return try {
+            propFindAt(endpoint.collectionUrlFor(path), WebDavDepth.ZERO).resourceAt(path)
+        } catch (_: WebDavException.NotFound) {
+            null
+        }
+    }
+
+    private suspend fun propFindAt(
+        url: HttpUrl,
+        depth: WebDavDepth,
     ): List<WebDavResource> = withContext(Dispatchers.IO) {
-        val url = endpoint.collectionUrlFor(path)
         val response = executeAuthenticated { lease ->
             Request.Builder()
                 .url(url)
@@ -88,6 +108,10 @@ class OkHttpWebDavClient(
             }
         }
     }
+
+    private fun List<WebDavResource>.resourceAt(path: WebDavPath): WebDavResource =
+        firstOrNull { it.path == path }
+            ?: throw WebDavException.InvalidResponse("WebDAV PROPFIND response omitted the requested resource")
 
     override suspend fun head(path: WebDavPath): WebDavMetadata {
         val response = executeAuthenticated { lease ->
@@ -126,9 +150,27 @@ class OkHttpWebDavClient(
         path: WebDavPath,
         range: WebDavByteRange?,
         ifRange: String?,
+    ): WebDavReadResponse = getInternal(
+        path = path,
+        range = range,
+        ifRange = ifRange,
+        ifMatch = null,
+        requiredPermission = WebDavPermission.READ_ONLY,
+    )
+
+    private suspend fun getInternal(
+        path: WebDavPath,
+        range: WebDavByteRange?,
+        ifRange: String?,
+        ifMatch: String?,
+        requiredPermission: WebDavPermission,
     ): WebDavReadResponse {
         validateOptionalHeader(ifRange, "If-Range")
-        val response = executeAuthenticated(followSameOriginRedirects = true) { lease ->
+        validateOptionalHeader(ifMatch, "If-Match")
+        val response = executeAuthenticated(
+            requiredPermission = requiredPermission,
+            followSameOriginRedirects = true,
+        ) { lease ->
             Request.Builder()
                 .url(endpoint.urlFor(path))
                 .header("Authorization", lease.basicAuthorization())
@@ -136,6 +178,7 @@ class OkHttpWebDavClient(
                 .apply {
                     if (range != null) header("Range", range.toHeaderValue())
                     if (ifRange != null) header("If-Range", ifRange)
+                    if (ifMatch != null) header("If-Match", ifMatch)
                 }
                 .build()
         }
@@ -252,6 +295,37 @@ class OkHttpWebDavClient(
                 .method("COPY", null)
                 .build()
         }.use { requireStatus(it, setOf(200, 201, 204)) }
+    }
+
+    override suspend fun copyFileContents(
+        source: WebDavPath,
+        destination: WebDavPath,
+        overwrite: Boolean,
+        sourceEtag: String?,
+    ) {
+        val strongEtag = sourceEtag.strongEntityTagOrNull()
+        getInternal(
+            path = source,
+            range = null,
+            ifRange = null,
+            ifMatch = strongEtag,
+            requiredPermission = WebDavPermission.READ_WRITE,
+        ).use { response ->
+            var streamOpened = false
+            put(
+                path = destination,
+                upload = WebDavUpload(
+                    contentLength = response.metadata.contentLength,
+                    contentType = response.metadata.contentType,
+                    openStream = {
+                        check(!streamOpened) { "A streamed WebDAV copy cannot reopen its source" }
+                        streamOpened = true
+                        response.stream
+                    },
+                ),
+                overwrite = overwrite,
+            )
+        }
     }
 
     private suspend fun executeWrite(factory: (CredentialLease) -> Request): Response =
